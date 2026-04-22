@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Repurpose Bot — Fadeflux Agency</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --panel-2: #1a1e24;
+    --border: #262b33;
+    --border-strong: #3a414c;
+    --text: #e6e8eb;
+    --text-muted: #8a929e;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --accent-soft: rgba(59, 130, 246, 0.15);
+    --success: #22c55e;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .container { max-width: 1300px; margin: 0 auto; }
+  h1 {
+    text-align: center;
+    margin: 0 0 6px 0;
+    font-size: 28px;
+    font-weight: 600;
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--text-muted);
+    margin-bottom: 28px;
+    font-size: 14px;
+  }
+  .subtitle .warn { color: var(--warning); font-weight: 600; }
+
+  /* Upload zone */
+  .upload-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .upload-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .upload-row:last-child { margin-bottom: 0; }
+  .upload-row label {
+    min-width: 180px;
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .upload-row input[type="text"],
+  .file-display {
+    flex: 1;
+    background: var(--panel-2);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .file-display {
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    color: var(--text-muted);
+  }
+  .file-display.selected { color: var(--text); }
+  .btn {
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 10px 22px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .btn:hover { background: var(--panel-2); border-color: var(--accent); }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    font-weight: 500;
+    width: 100%;
+    padding: 14px;
+    font-size: 15px;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled {
+    background: var(--panel-2);
+    border-color: var(--border);
+    color: var(--text-muted);
+    cursor: not-allowed;
+  }
+
+  /* Grid des paramètres */
+  .params-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .param-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    transition: border-color 0.15s, opacity 0.15s;
+  }
+  .param-card.disabled {
+    opacity: 0.5;
+  }
+  .param-card.disabled input[type="number"] {
+    pointer-events: none;
+  }
+  .param-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .param-header input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .param-inputs {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .param-inputs label {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .param-inputs input {
+    width: 60px;
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 5px 7px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .param-inputs input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  /* Footer avec copies + bouton */
+  .footer-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  .copies-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+  }
+  .copies-box label { font-weight: 500; font-size: 14px; }
+  .copies-box input {
+    width: 70px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+
+  /* Résultats */
+  .results {
+    margin-top: 20px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    display: none;
+  }
+  .results.active { display: block; }
+  .results h3 { margin: 0 0 12px 0; font-size: 16px; }
+  .result-item {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+  }
+  .result-item.fail { border-color: var(--danger); }
+  .result-item .name { font-family: monospace; color: var(--text-muted); font-size: 12px; }
+  .result-item .dl {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 13px;
+  }
+  .result-item .dl:hover { text-decoration: underline; }
+
+  /* Status */
+  .status-bar {
+    padding: 10px 14px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    display: none;
+  }
+  .status-bar.active { display: block; }
+  .status-bar.loading { background: var(--accent-soft); color: var(--accent); }
+  .status-bar.success { background: rgba(34, 197, 94, 0.15); color: var(--success); }
+  .status-bar.error { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+
+  /* Spinner */
+  .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--accent);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Repurpose Bot</h1>
+  <p class="subtitle">
+    <span class="warn">IMPORTANT :</span>
+    Décoche une case pour désactiver le filtre. Les valeurs seront randomisées entre Min et Max.
+  </p>
+
+  <!-- Upload -->
+  <div class="upload-box">
+    <div class="upload-row">
+      <label>Select Video File :</label>
+      <div class="file-display" id="fileDisplay">Aucun fichier sélectionné</div>
+      <input type="file" id="fileInput" accept="video/*" style="display:none" />
+      <button class="btn" onclick="document.getElementById('fileInput').click()">Browse</button>
+    </div>
+  </div>
+
+  <!-- Params grid -->
+  <div class="params-grid" id="paramsGrid"></div>
+
+  <!-- Footer: copies + generate -->
+  <div class="footer-row">
+    <div class="copies-box">
+      <label>Generate Copies :</label>
+      <input type="number" id="copies" value="1" min="1" max="20" />
+    </div>
+  </div>
+
+  <button class="btn btn-primary" id="generateBtn" onclick="generate()">Generate</button>
+
+  <!-- Status + results -->
+  <div class="status-bar" id="statusBar"></div>
+  <div class="results" id="resultsBox">
+    <h3>Vidéos générées</h3>
+    <div id="resultsList"></div>
+  </div>
+</div>
+
+<script>
+// =========================================================================
+// Définition des paramètres (aligné avec le backend)
+// =========================================================================
+const PARAMS = [
+  { key: "framerate",  label: "Framerate",    min: 30,    max: 60,    step: 1,      defMin: 30,    defMax: 60    },
+  { key: "bitrate",    label: "Video Bitrate",min: 1000,  max: 20000, step: 100,    defMin: 5000,  defMax: 6000  },
+  { key: "brightness", label: "Brightness",   min: -1,    max: 1,     step: 0.01,   defMin: -0.05, defMax: 0.05  },
+  { key: "contrast",   label: "Contrast",     min: 0,     max: 2,     step: 0.01,   defMin: 0.95,  defMax: 1.10  },
+  { key: "saturation", label: "Saturation",   min: 0,     max: 3,     step: 0.01,   defMin: 0.95,  defMax: 1.15  },
+  { key: "gamma",      label: "Gamma",        min: 0.1,   max: 10,    step: 0.01,   defMin: 0.95,  defMax: 1.05  },
+  { key: "speed",      label: "Speed",        min: 0.5,   max: 2,     step: 0.001,  defMin: 1.03,  defMax: 1.04  },
+  { key: "zoom",       label: "Zoom",         min: 1.0,   max: 1.3,   step: 0.001,  defMin: 1.03,  defMax: 1.06  },
+  { key: "noise",      label: "Noise",        min: 0,     max: 100,   step: 1,      defMin: 5,     defMax: 15    },
+  { key: "vignette",   label: "Vignette",     min: 0,     max: 1.5,   step: 0.01,   defMin: 0.20,  defMax: 0.40  },
+  { key: "rotation",   label: "Rotation",     min: -5,    max: 5,     step: 0.1,    defMin: -0.5,  defMax: 0.5   },
+  { key: "cut_start",  label: "Cut Start",    min: 0,     max: 5,     step: 0.01,   defMin: 0.1,   defMax: 0.15  },
+  { key: "cut_end",    label: "Cut End",      min: 0,     max: 5,     step: 0.01,   defMin: 0.1,   defMax: 0.15  },
+];
+
+// =========================================================================
+// Construction de la grille de paramètres
+// =========================================================================
+function buildParamsGrid() {
+  const grid = document.getElementById("paramsGrid");
+  grid.innerHTML = "";
+  PARAMS.forEach(p => {
+    const card = document.createElement("div");
+    card.className = "param-card";
+    card.dataset.key = p.key;
+    card.innerHTML = `
+      <div class="param-header">
+        <input type="checkbox" id="cb_${p.key}" checked />
+        <label for="cb_${p.key}">${p.label}</label>
+      </div>
+      <div class="param-inputs">
+        <label>Min</label>
+        <input type="number" id="min_${p.key}" value="${p.defMin}" step="${p.step}" min="${p.min}" max="${p.max}" />
+        <label>Max</label>
+        <input type="number" id="max_${p.key}" value="${p.defMax}" step="${p.step}" min="${p.min}" max="${p.max}" />
+      </div>
+    `;
+    grid.appendChild(card);
+
+    // Toggle opacity when checkbox changes
+    const cb = card.querySelector(`#cb_${p.key}`);
+    cb.addEventListener("change", () => {
+      card.classList.toggle("disabled", !cb.checked);
+    });
+  });
+}
+
+// =========================================================================
+// Gestion du fichier sélectionné
+// =========================================================================
+const fileInput = document.getElementById("fileInput");
+const fileDisplay = document.getElementById("fileDisplay");
+fileInput.addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (f) {
+    const sizeMB = (f.size / 1024 / 1024).toFixed(1);
+    fileDisplay.textContent = `${f.name} (${sizeMB} MB)`;
+    fileDisplay.classList.add("selected");
+  } else {
+    fileDisplay.textContent = "Aucun fichier sélectionné";
+    fileDisplay.classList.remove("selected");
+  }
+});
+
+// =========================================================================
+// Status bar helpers
+// =========================================================================
+function setStatus(msg, type = "loading") {
+  const bar = document.getElementById("statusBar");
+  bar.className = `status-bar active ${type}`;
+  bar.innerHTML = type === "loading"
+    ? `<span class="spinner"></span>${msg}`
+    : msg;
+}
+function clearStatus() {
+  document.getElementById("statusBar").classList.remove("active");
+}
+
+// =========================================================================
+// Construction du payload et envoi
+// =========================================================================
+async function generate() {
+  const file = fileInput.files[0];
+  if (!file) {
+    setStatus("Sélectionne d'abord une vidéo.", "error");
+    return;
+  }
+
+  const copies = parseInt(document.getElementById("copies").value, 10) || 1;
+
+  // Assemble les custom_ranges et enabled_filters
+  const customRanges = {};
+  const enabledFilters = [];
+  PARAMS.forEach(p => {
+    const cb = document.getElementById(`cb_${p.key}`);
+    if (cb.checked) {
+      enabledFilters.push(p.key);
+      const minVal = parseFloat(document.getElementById(`min_${p.key}`).value);
+      const maxVal = parseFloat(document.getElementById(`max_${p.key}`).value);
+      customRanges[p.key] = [minVal, maxVal];
+    }
+  });
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("copies", copies);
+  formData.append("concurrency", 2);
+  formData.append("custom_ranges", JSON.stringify(customRanges));
+  formData.append("enabled_filters", JSON.stringify(enabledFilters));
+
+  const btn = document.getElementById("generateBtn");
+  btn.disabled = true;
+  setStatus(`Traitement en cours... (${copies} ${copies > 1 ? "copies" : "copie"})`);
+  document.getElementById("resultsBox").classList.remove("active");
+
+  try {
+    const res = await fetch("/api/process", {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      setStatus(`Erreur : ${data.detail || "échec du traitement"}`, "error");
+      btn.disabled = false;
+      return;
+    }
+
+    renderResults(data);
+    const msg = data.failed > 0
+      ? `${data.succeeded} succès, ${data.failed} échec(s).`
+      : `${data.succeeded} vidéo${data.succeeded > 1 ? "s" : ""} générée${data.succeeded > 1 ? "s" : ""} avec succès.`;
+    setStatus(msg, data.failed > 0 ? "error" : "success");
+  } catch (e) {
+    setStatus(`Erreur réseau : ${e.message}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// =========================================================================
+// Affichage des résultats
+// =========================================================================
+function renderResults(data) {
+  const box = document.getElementById("resultsBox");
+  const list = document.getElementById("resultsList");
+  list.innerHTML = "";
+  data.results.forEach(r => {
+    const div = document.createElement("div");
+    div.className = "result-item" + (r.success ? "" : " fail");
+    if (r.success) {
+      const sizeMB = (r.size_bytes / 1024 / 1024).toFixed(2);
+      div.innerHTML = `
+        <div>
+          <div>Copy #${r.copy_index} · ${sizeMB} MB</div>
+          <div class="name">${r.filename}</div>
+        </div>
+        <a class="dl" href="/api/download/${r.filename}" download>Télécharger ↓</a>
+      `;
+    } else {
+      div.innerHTML = `
+        <div>
+          <div>Copy #${r.copy_index} — <span style="color:var(--danger)">échec</span></div>
+          <div class="name">${(r.error || "").slice(0, 100)}</div>
+        </div>
+      `;
+    }
+    list.appendChild(div);
+  });
+  box.classList.add("active");
+}
+
+// Init
+buildParamsGrid();
+</script>
+</body>
+</html>
