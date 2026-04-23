@@ -163,9 +163,13 @@ def random_metadata() -> Dict[str, str]:
     format_time = base_date.strftime("%Y-%m-%dT%H:%M:%S.000000Z")
     # Format Apple QuickTime (avec timezone +0000 au lieu de Z)
     apple_creationdate = base_date.strftime("%Y-%m-%dT%H:%M:%S+0000")
-    # Les streams ont un léger décalage par rapport au format (typique iPhone)
-    stream_offset = timedelta(milliseconds=random.randint(800, 2000))
-    stream_time = (base_date + stream_offset).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+    # Sur un vrai iPhone (décalages visibles au niveau seconde) :
+    #  - stream vidéo : démarre 1-3 secondes après le format (init camera)
+    #  - stream audio : démarre 1-3 secondes après la vidéo (init micro)
+    video_offset = timedelta(seconds=random.randint(1, 3))
+    audio_offset_extra = timedelta(seconds=random.randint(1, 2))
+    v_stream_time = (base_date + video_offset).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+    a_stream_time = (base_date + video_offset + audio_offset_extra).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
 
     # UUID unique pour identifiant contenu
     content_uuid = _apple_uuid()
@@ -207,10 +211,13 @@ def random_metadata() -> Dict[str, str]:
         "encoder": f"Lavf{lavf}",
 
         # ---- Stream-level tags (pour les pistes vidéo/audio) ----
-        # Note: ffmpeg applique -metadata aussi aux streams par défaut.
-        # Le décalage format/stream se fait naturellement via creation_time.
-        "_stream_creation_time": stream_time,   # consommé par le service ffmpeg
-        "_stream_encoder_lavc": f"Lavc{lavc} libx264",  # idem
+        # Timings décalés entre format / video / audio (comme vrai iPhone)
+        "_video_creation_time": v_stream_time,
+        "_audio_creation_time": a_stream_time,
+        "_stream_encoder_lavc": f"Lavc{lavc} libx264",
+        # Handler names comme un vrai iPhone
+        "_video_handler_name": "Core Media Video",
+        "_audio_handler_name": "Core Media Audio",
     }
 
 
@@ -226,17 +233,23 @@ def metadata_to_ffmpeg_args(metadata: Dict[str, str]) -> list:
         # -metadata s'applique au format (container MP4)
         args += ["-metadata", f"{key}={value}"]
 
-    # Stream-specific (creation_time décalé sur les streams)
-    stream_time = metadata.get("_stream_creation_time")
-    if stream_time:
-        args += [
-            "-metadata:s:v:0", f"creation_time={stream_time}",
-            "-metadata:s:a:0", f"creation_time={stream_time}",
-        ]
+    # Stream vidéo : creation_time décalé + handler_name + encoder
+    v_time = metadata.get("_video_creation_time")
+    v_handler = metadata.get("_video_handler_name")
+    v_encoder = metadata.get("_stream_encoder_lavc")
+    if v_time:
+        args += ["-metadata:s:v:0", f"creation_time={v_time}"]
+    if v_handler:
+        args += ["-metadata:s:v:0", f"handler_name={v_handler}"]
+    if v_encoder:
+        args += ["-metadata:s:v:0", f"encoder={v_encoder}"]
 
-    # Stream-specific (encoder) – seulement sur le stream vidéo
-    stream_enc = metadata.get("_stream_encoder_lavc")
-    if stream_enc:
-        args += ["-metadata:s:v:0", f"encoder={stream_enc}"]
+    # Stream audio : creation_time décalé (encore un peu) + handler_name
+    a_time = metadata.get("_audio_creation_time")
+    a_handler = metadata.get("_audio_handler_name")
+    if a_time:
+        args += ["-metadata:s:a:0", f"creation_time={a_time}"]
+    if a_handler:
+        args += ["-metadata:s:a:0", f"handler_name={a_handler}"]
 
     return args
