@@ -64,7 +64,8 @@ def build_filter_complex(params: Dict[str, Optional[float]]) -> str:
     filters.append(f"fps={settings.TARGET_FPS}")
 
     # Scale + crop pour garantir le canvas 1080x1920
-    filters.append(f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=fast_bilinear")
+    # lanczos : meilleur algorithme de rescale, qualité haute gamme
+    filters.append(f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos")
     filters.append(f"crop={W}:{H}")
 
     # Force le sample aspect ratio à 1:1 (évite le 680:681 bizarre)
@@ -79,8 +80,8 @@ def build_filter_complex(params: Dict[str, Optional[float]]) -> str:
         crop_w -= crop_w % 2
         crop_h -= crop_h % 2
         filters.append(f"crop={crop_w}:{crop_h}")
-        # fast_bilinear : algorithme le plus rapide, différence visuelle négligeable à 1080p
-        filters.append(f"scale={W}:{H}:flags=fast_bilinear")
+        # lanczos pour le rescale après crop zoom : qualité haute
+        filters.append(f"scale={W}:{H}:flags=lanczos")
         filters.append("setsar=1:1")
 
     # Rotation (optionnelle) — appliquée AVANT le crop final pour ne pas casser l'aspect
@@ -195,17 +196,24 @@ async def process_one(
         # Copie bit-à-bit : aucun re-encodage audio, gain significatif
         audio_cmd = ["-c:a", "copy"]
 
-    cmd += [
-        # Encodage vidéo
+    # Args vidéo principaux
+    video_cmd: List[str] = [
         "-c:v", settings.VIDEO_ENCODER,
         "-preset", settings.PRESET,
-        "-tune", settings.TUNE,         # fastdecode : optimise pour lecture TikTok/mobile
+    ]
+    # N'ajoute -tune que s'il est défini (ultrafast force Baseline, on l'évite)
+    if settings.TUNE:
+        video_cmd += ["-tune", settings.TUNE]
+
+    video_cmd += [
         "-profile:v", settings.VIDEO_PROFILE,
         "-level:v", "4.2",
         "-b:v", f"{bitrate}k",
         "-maxrate", f"{int(bitrate * 1.3)}k",
         "-bufsize", f"{int(bitrate * 2)}k",
         "-pix_fmt", "yuv420p",
+        # Paramètres qualité explicites (assurent High profile, non baseline)
+        "-x264-params", "cabac=1:ref=3:b-adapt=1:bframes=3:weightp=2",
         "-color_primaries", "bt709",
         "-color_trc", "bt709",
         "-colorspace", "bt709",
@@ -213,6 +221,9 @@ async def process_one(
         "-r", str(settings.TARGET_FPS),
         # Threads : 0 = auto (ffmpeg utilise tous les cores dispo)
         "-threads", "0",
+    ]
+
+    cmd += video_cmd + [
         # Audio (copie ou re-encode selon speed)
         *audio_cmd,
         # Conteneur
