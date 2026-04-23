@@ -45,6 +45,96 @@ async def get_param_ranges():
     }
 
 
+@router.get("/drive-debug")
+async def drive_debug():
+    """
+    Teste la configuration Drive et fait un upload de test.
+    Utilisé pour diagnostiquer les problèmes d'upload.
+    """
+    import os
+    from app.services.drive_service import get_drive_client
+
+    result = {
+        "env_vars": {
+            "GOOGLE_CREDENTIALS_JSON": bool(os.getenv("GOOGLE_CREDENTIALS_JSON")),
+            "GOOGLE_DRIVE_PARENT_ID": os.getenv("GOOGLE_DRIVE_PARENT_ID") or None,
+        },
+        "drive_enabled": is_drive_enabled(),
+        "client_initialized": False,
+        "service_account_email": None,
+        "test_folder_creation": None,
+        "test_file_upload": None,
+        "errors": [],
+    }
+
+    # Test 1 : client initialisé
+    try:
+        client = get_drive_client()
+        if client is None:
+            result["errors"].append("get_drive_client() a retourné None")
+            return result
+        result["client_initialized"] = True
+    except Exception as e:
+        result["errors"].append(f"Erreur init client: {type(e).__name__}: {e}")
+        return result
+
+    # Test 2 : récup email du service account
+    try:
+        creds_raw = os.getenv("GOOGLE_CREDENTIALS_JSON", "{}")
+        creds_dict = json.loads(creds_raw) if creds_raw.startswith("{") else {}
+        result["service_account_email"] = creds_dict.get("client_email")
+    except Exception as e:
+        result["errors"].append(f"Parse credentials: {e}")
+
+    # Test 3 : création d'un dossier test
+    try:
+        test_folder_id = create_batch_folder("drive_test_diagnostic")
+        if test_folder_id:
+            result["test_folder_creation"] = {
+                "success": True,
+                "folder_id": test_folder_id,
+                "folder_url": get_folder_link(test_folder_id),
+            }
+        else:
+            result["test_folder_creation"] = {"success": False}
+            result["errors"].append("create_batch_folder() a retourné None")
+    except Exception as e:
+        result["test_folder_creation"] = {"success": False, "error": str(e)}
+        result["errors"].append(f"Création dossier: {type(e).__name__}: {e}")
+
+    # Test 4 : upload d'un petit fichier texte test
+    if result["test_folder_creation"] and result["test_folder_creation"].get("success"):
+        try:
+            test_file = OUTPUT_DIR / "drive_test_file.txt"
+            test_file.write_text("Ceci est un fichier de test Drive")
+            upload_result = upload_file(
+                test_file,
+                result["test_folder_creation"]["folder_id"],
+                mime_type="text/plain",
+            )
+            if upload_result:
+                result["test_file_upload"] = {
+                    "success": True,
+                    "file_id": upload_result.get("id"),
+                    "file_url": upload_result.get("webViewLink"),
+                }
+            else:
+                result["test_file_upload"] = {"success": False}
+                result["errors"].append(
+                    "upload_file() a retourné None. Cause probable : "
+                    "le Service Account n'a pas de quota storage. "
+                    "Solution : partager le dossier Drive parent avec l'email "
+                    f"du service account ({result['service_account_email']}) "
+                    "en tant qu'Editor, OU utiliser un Shared Drive."
+                )
+            test_file.unlink(missing_ok=True)
+        except Exception as e:
+            result["test_file_upload"] = {"success": False, "error": str(e)}
+            result["errors"].append(f"Upload test: {type(e).__name__}: {e}")
+
+    return result
+
+
 def _sanitize_batch_name(name: str) -> str:
     """Nettoie un nom de batch pour qu'il soit safe dans Drive / FS."""
     name = name.strip()
