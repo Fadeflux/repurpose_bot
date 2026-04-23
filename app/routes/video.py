@@ -76,6 +76,7 @@ async def process_endpoint(
     copies_per_video: int = Form(1, ge=1, description="Nombre de variantes par vidéo"),
     concurrency: int = Form(4, ge=1, le=6, description="Processus ffmpeg parallèles"),
     upload_to_drive: bool = Form(True, description="Envoyer sur Google Drive"),
+    device_choice: str = Form("mix_random", description="Type de device à simuler"),
     custom_ranges: Optional[str] = Form(None),
     enabled_filters: Optional[str] = Form(None),
 ):
@@ -186,6 +187,7 @@ async def process_endpoint(
                 concurrency=concurrency,
                 custom_ranges=parsed_ranges,
                 enabled_filters=parsed_filters,
+                device_choice=device_choice,
             )
             for r in results:
                 r["source_file"] = source_label
