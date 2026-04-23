@@ -30,13 +30,14 @@ class Settings(BaseSettings):
     # Framerate cible fixe (60 fps = qualité max TikTok, pas de valeurs suspectes)
     TARGET_FPS: int = 60
 
-    # Encodeur optimisé pour vitesse
+    # Encodeur : veryfast permet le High profile H.264 (ultrafast force Baseline)
+    # Bon compromis vitesse/qualité
     VIDEO_ENCODER: str = "libx264"
-    PRESET: str = "ultrafast"      # 2x plus rapide que medium, qualité OK à 10 Mbps
-    TUNE: str = "fastdecode"       # optimise pour lecture rapide (TikTok, mobile)
+    PRESET: str = "veryfast"       # High profile OK, qualité nettement meilleure qu'ultrafast
+    TUNE: str = ""                 # pas de tune (fastdecode dégradait la qualité)
     VIDEO_PROFILE: str = "high"
     AUDIO_CODEC: str = "aac"
-    AUDIO_BITRATE: str = "192k"    # audio TikTok-like
+    AUDIO_BITRATE: str = "192k"
 
     # Format cible TikTok vertical
     TARGET_WIDTH: int = 1080
