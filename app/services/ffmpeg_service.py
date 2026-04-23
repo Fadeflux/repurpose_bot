@@ -64,7 +64,7 @@ def build_filter_complex(params: Dict[str, Optional[float]]) -> str:
     filters.append(f"fps={settings.TARGET_FPS}")
 
     # Scale + crop pour garantir le canvas 1080x1920
-    filters.append(f"scale={W}:{H}:force_original_aspect_ratio=increase")
+    filters.append(f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=fast_bilinear")
     filters.append(f"crop={W}:{H}")
 
     # Force le sample aspect ratio à 1:1 (évite le 680:681 bizarre)
@@ -79,8 +79,8 @@ def build_filter_complex(params: Dict[str, Optional[float]]) -> str:
         crop_w -= crop_w % 2
         crop_h -= crop_h % 2
         filters.append(f"crop={crop_w}:{crop_h}")
-        # bicubic : ~30% plus rapide que lanczos, qualité très proche
-        filters.append(f"scale={W}:{H}:flags=bicubic")
+        # fast_bilinear : algorithme le plus rapide, différence visuelle négligeable à 1080p
+        filters.append(f"scale={W}:{H}:flags=fast_bilinear")
         filters.append("setsar=1:1")
 
     # Rotation (optionnelle) — appliquée AVANT le crop final pour ne pas casser l'aspect
@@ -181,6 +181,20 @@ async def process_one(
     if af:
         cmd += ["-af", af]
 
+    # Audio : si pas de filtre speed à appliquer → copie directe (ULTRA rapide)
+    # Sinon re-encode avec atempo
+    audio_cmd: List[str]
+    if af:
+        audio_cmd = [
+            "-c:a", settings.AUDIO_CODEC,
+            "-b:a", settings.AUDIO_BITRATE,
+            "-ar", "44100",
+            "-ac", "2",
+        ]
+    else:
+        # Copie bit-à-bit : aucun re-encodage audio, gain significatif
+        audio_cmd = ["-c:a", "copy"]
+
     cmd += [
         # Encodage vidéo
         "-c:v", settings.VIDEO_ENCODER,
@@ -199,11 +213,8 @@ async def process_one(
         "-r", str(settings.TARGET_FPS),
         # Threads : 0 = auto (ffmpeg utilise tous les cores dispo)
         "-threads", "0",
-        # Audio
-        "-c:a", settings.AUDIO_CODEC,
-        "-b:a", settings.AUDIO_BITRATE,
-        "-ar", "44100",
-        "-ac", "2",
+        # Audio (copie ou re-encode selon speed)
+        *audio_cmd,
         # Conteneur
         # +faststart : moov atom au début pour lecture instantanée
         # +use_metadata_tags : autorise les tags Apple (com.apple.quicktime.*)
