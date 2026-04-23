@@ -5,7 +5,7 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import aiofiles
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -26,6 +26,31 @@ router = APIRouter(prefix="/api", tags=["video"])
 logger = get_logger("routes")
 
 
+# ---------------------------------------------------------------------------
+# Tracking en mémoire du progrès des batches Drive
+# {batch_id: {"total": N, "uploaded": X, "done": bool}}
+# ---------------------------------------------------------------------------
+_batch_progress: Dict[str, Dict] = {}
+_MAX_TRACKED_BATCHES = 20  # garde en mémoire les 20 derniers batches
+
+
+def _update_progress(batch_id: str, total: int = None, uploaded_delta: int = 0, done: bool = False):
+    """Met à jour le progrès d'un batch en mémoire."""
+    if batch_id not in _batch_progress:
+        _batch_progress[batch_id] = {"total": 0, "uploaded": 0, "done": False}
+    if total is not None:
+        _batch_progress[batch_id]["total"] = total
+    if uploaded_delta:
+        _batch_progress[batch_id]["uploaded"] += uploaded_delta
+    if done:
+        _batch_progress[batch_id]["done"] = True
+    # Nettoyage : garde seulement les N derniers
+    if len(_batch_progress) > _MAX_TRACKED_BATCHES:
+        oldest_keys = list(_batch_progress.keys())[:-_MAX_TRACKED_BATCHES]
+        for k in oldest_keys:
+            _batch_progress.pop(k, None)
+
+
 @router.get("/health")
 async def health():
     return {
@@ -43,6 +68,57 @@ async def get_param_ranges():
         key: {"min": lo, "max": hi}
         for key, (lo, hi) in PARAM_RANGES.items()
     }
+
+
+@router.get("/progress/{batch_id}")
+async def get_batch_progress(batch_id: str):
+    """
+    Retourne le progrès d'upload Drive pour un batch en cours.
+    Utilisé par le frontend pour afficher une barre de progression.
+    """
+    info = _batch_progress.get(batch_id)
+    if not info:
+        return {"found": False, "total": 0, "uploaded": 0, "done": False}
+    return {
+        "found": True,
+        "total": info["total"],
+        "uploaded": info["uploaded"],
+        "done": info["done"],
+        "percent": round(100 * info["uploaded"] / max(1, info["total"]), 1),
+    }
+
+
+@router.get("/progress-current")
+async def get_current_batch_progress():
+    """
+    Retourne le progrès du batch le plus récent non terminé.
+    Permet au frontend de polling sans connaître l'ID à l'avance.
+    """
+    # Cherche le dernier batch non terminé
+    for batch_id in reversed(list(_batch_progress.keys())):
+        info = _batch_progress[batch_id]
+        if not info["done"]:
+            return {
+                "found": True,
+                "batch_id": batch_id,
+                "total": info["total"],
+                "uploaded": info["uploaded"],
+                "done": False,
+                "percent": round(100 * info["uploaded"] / max(1, info["total"]), 1),
+            }
+    # Sinon retourne le tout dernier (terminé)
+    if _batch_progress:
+        batch_id = list(_batch_progress.keys())[-1]
+        info = _batch_progress[batch_id]
+        return {
+            "found": True,
+            "batch_id": batch_id,
+            "total": info["total"],
+            "uploaded": info["uploaded"],
+            "done": info["done"],
+            "percent": round(100 * info["uploaded"] / max(1, info["total"]), 1),
+        }
+    return {"found": False, "total": 0, "uploaded": 0, "done": False}
 
 
 @router.get("/drive-debug")
@@ -158,7 +234,7 @@ def _sanitize_batch_name(name: str) -> str:
     return name[:80]
 
 
-async def _async_drive_upload(result: dict, folder_id: str) -> None:
+async def _async_drive_upload(result: dict, folder_id: str, batch_id: str = None) -> None:
     """Upload un fichier vers Drive en arrière-plan. Modifie result in-place."""
     try:
         loop = asyncio.get_event_loop()
@@ -168,6 +244,8 @@ async def _async_drive_upload(result: dict, folder_id: str) -> None:
         if res:
             result["drive_url"] = res.get("webViewLink")
             result["drive_id"] = res.get("id")
+            if batch_id:
+                _update_progress(batch_id, uploaded_delta=1)
     except Exception as e:
         logger.warning(f"Drive upload échoué pour {result.get('filename')}: {e}")
 
@@ -279,6 +357,11 @@ async def process_endpoint(
     all_results: List[dict] = []
     drive_upload_tasks: List[asyncio.Task] = []
 
+    # Initialise le tracking du progrès Drive
+    if drive_folder_id:
+        total_expected = len(src_paths) * copies_per_video
+        _update_progress(full_batch_id, total=total_expected)
+
     try:
         for src_idx, src in enumerate(src_paths):
             source_label = files[src_idx].filename or src.name
@@ -297,7 +380,9 @@ async def process_endpoint(
                 r["source_index"] = src_idx + 1
                 # Lance l'upload Drive en background SI succès + Drive activé
                 if r.get("success") and drive_folder_id:
-                    task = asyncio.create_task(_async_drive_upload(r, drive_folder_id))
+                    task = asyncio.create_task(
+                        _async_drive_upload(r, drive_folder_id, full_batch_id)
+                    )
                     drive_upload_tasks.append(task)
             all_results.extend(results)
     except RuntimeError as e:
@@ -314,6 +399,10 @@ async def process_endpoint(
     if drive_upload_tasks:
         logger.info(f"[{full_batch_id}] Finalisation {len(drive_upload_tasks)} uploads Drive")
         await asyncio.gather(*drive_upload_tasks, return_exceptions=True)
+
+    # Marque le batch comme terminé pour le polling
+    if drive_folder_id:
+        _update_progress(full_batch_id, done=True)
 
     success = [r for r in all_results if r.get("success")]
     failed = [r for r in all_results if not r.get("success")]
