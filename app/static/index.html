@@ -398,6 +398,20 @@
   <button class="btn btn-primary" id="generateBtn" onclick="generate()">Generate</button>
 
   <div class="status-bar" id="statusBar"></div>
+
+  <!-- Drive upload progress bar -->
+  <div id="driveProgressWrap" style="display:none; margin-top:12px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <span style="font-size:13px; color:var(--muted);">
+        📁 Upload Google Drive
+      </span>
+      <span style="font-size:13px; color:var(--muted);" id="driveProgressText">0 / 0</span>
+    </div>
+    <div style="background:var(--panel-2); border-radius:8px; height:20px; overflow:hidden; border:1px solid var(--border);">
+      <div id="driveProgressBar" style="background:linear-gradient(90deg, #4285f4, #34a853); height:100%; width:0%; transition:width 0.3s ease; display:flex; align-items:center; justify-content:center; color:white; font-size:12px; font-weight:600;"></div>
+    </div>
+  </div>
+
   <div class="results" id="resultsBox">
     <h3>Résultats</h3>
     <div id="driveBanner"></div>
@@ -560,9 +574,46 @@ async function generate() {
   setStatus(`Traitement en cours... ${files.length} vidéo${files.length > 1 ? "s" : ""} × ${copies} = ${totalExpected} sorties. Patience (ça peut prendre plusieurs minutes).`);
   document.getElementById("resultsBox").classList.remove("active");
 
+  // Démarre la barre de progression Drive si activé
+  let progressInterval = null;
+  if (uploadDrive) {
+    const wrap = document.getElementById("driveProgressWrap");
+    const bar = document.getElementById("driveProgressBar");
+    const txt = document.getElementById("driveProgressText");
+    wrap.style.display = "block";
+    bar.style.width = "0%";
+    bar.textContent = "";
+    txt.textContent = `0 / ${totalExpected}`;
+
+    progressInterval = setInterval(async () => {
+      try {
+        const r = await fetch("/api/progress-current");
+        const p = await r.json();
+        if (p.found && p.total > 0) {
+          const percent = p.percent || 0;
+          bar.style.width = percent + "%";
+          bar.textContent = percent > 10 ? percent.toFixed(1) + "%" : "";
+          txt.textContent = `${p.uploaded} / ${p.total}`;
+          if (p.done) {
+            bar.style.width = "100%";
+            bar.textContent = "100%";
+            clearInterval(progressInterval);
+            progressInterval = null;
+          }
+        }
+      } catch (e) {
+        // silent, continue polling
+      }
+    }, 1500);
+  }
+
   try {
     const res = await fetch("/api/process", { method: "POST", body: formData });
     const data = await res.json();
+    if (progressInterval) {
+      clearInterval(progressInterval);
+      progressInterval = null;
+    }
 
     if (!res.ok) {
       setStatus(`Erreur : ${data.detail || "échec du traitement"}`, "error");
