@@ -1,12 +1,14 @@
 """
-Service Google Drive.
+Service Google Drive avec support OAuth (recommandé) ou Service Account (fallback).
 
-Gère l'authentification via Service Account et l'upload de fichiers
-dans un dossier partagé du Drive Fadeflux.
+Variables d'environnement :
+  Option 1 - OAuth (RECOMMANDÉ — utilise ton quota personnel 200 GB) :
+    - GOOGLE_OAUTH_TOKEN_JSON : contenu JSON du token OAuth généré avec generate_token.py
+    - GOOGLE_DRIVE_PARENT_ID  : ID du dossier racine sur Drive
 
-Variables d'environnement requises :
-  - GOOGLE_CREDENTIALS_JSON : contenu JSON complet de la clé du Service Account
-  - GOOGLE_DRIVE_PARENT_ID  : ID du dossier "racine" sur Drive
+  Option 2 - Service Account (fallback, souvent limité par quota) :
+    - GOOGLE_CREDENTIALS_JSON : contenu JSON du Service Account
+    - GOOGLE_DRIVE_PARENT_ID  : ID du dossier racine
 """
 import csv
 import io
@@ -20,100 +22,102 @@ from app.utils.logger import get_logger
 logger = get_logger("drive_service")
 
 
-# Imports Google : lazy pour que l'app démarre même si les libs ne sont pas là
+# ---------------------------------------------------------------------------
+# Lazy loading des libs Google
+# ---------------------------------------------------------------------------
 def _load_google_libs():
     from google.oauth2 import service_account
+    from google.oauth2.credentials import Credentials as OAuthCredentials
+    from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
-    return service_account, build, MediaFileUpload, MediaIoBaseUpload
+    return service_account, OAuthCredentials, Request, build, MediaFileUpload, MediaIoBaseUpload
 
 
 # ---------------------------------------------------------------------------
-# Singleton client Drive
+# Client singleton
 # ---------------------------------------------------------------------------
 _drive_client = None
+_auth_mode = None  # "oauth" ou "service_account"
 
 
 def get_drive_client():
     """
-    Retourne un client Drive authentifié, ou None si pas configuré.
-    Cache le client pour éviter de re-authentifier à chaque appel.
+    Retourne un client Drive authentifié.
+    Priorité :
+      1. OAuth via GOOGLE_OAUTH_TOKEN_JSON (recommandé, pas de problème de quota)
+      2. Service Account via GOOGLE_CREDENTIALS_JSON (fallback, limité par quota)
     """
-    global _drive_client
+    global _drive_client, _auth_mode
     if _drive_client is not None:
         return _drive_client
 
+    _, OAuthCredentials, Request, build, _, _ = _load_google_libs()
+
+    # --- Tentative 1 : OAuth ---
+    oauth_json = os.getenv("GOOGLE_OAUTH_TOKEN_JSON")
+    if oauth_json:
+        try:
+            token_data = json.loads(oauth_json)
+            creds = OAuthCredentials(
+                token=token_data.get("token"),
+                refresh_token=token_data.get("refresh_token"),
+                token_uri=token_data.get("token_uri"),
+                client_id=token_data.get("client_id"),
+                client_secret=token_data.get("client_secret"),
+                scopes=token_data.get("scopes", ["https://www.googleapis.com/auth/drive"]),
+            )
+            # Rafraîchit si expiré
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                logger.info("Token OAuth rafraîchi automatiquement")
+            _drive_client = build("drive", "v3", credentials=creds, cache_discovery=False)
+            _auth_mode = "oauth"
+            logger.info("Drive client initialisé (mode OAuth - quota utilisateur)")
+            return _drive_client
+        except Exception as e:
+            logger.error(f"Erreur OAuth: {type(e).__name__}: {e}")
+            # On tombe en fallback Service Account
+
+    # --- Tentative 2 : Service Account (fallback) ---
     creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
     if not creds_json:
-        logger.info("GOOGLE_CREDENTIALS_JSON non défini : Drive désactivé.")
+        logger.info("Aucune auth configurée (ni OAuth ni Service Account) : Drive désactivé.")
         return None
 
     try:
-        service_account, build, _, _ = _load_google_libs()
-    except ImportError as e:
-        logger.error(f"Libs Google manquantes : {e}")
-        return None
-
-    try:
-        info = json.loads(creds_json)
-        credentials = service_account.Credentials.from_service_account_info(
-            info,
+        service_account, _, _, build, _, _ = _load_google_libs()
+        creds_dict = json.loads(creds_json)
+        creds = service_account.Credentials.from_service_account_info(
+            creds_dict,
             scopes=["https://www.googleapis.com/auth/drive"],
         )
-        _drive_client = build("drive", "v3", credentials=credentials, cache_discovery=False)
-        logger.info("Client Google Drive initialisé.")
+        _drive_client = build("drive", "v3", credentials=creds, cache_discovery=False)
+        _auth_mode = "service_account"
+        logger.info("Drive client initialisé (mode Service Account - attention quota)")
         return _drive_client
     except Exception as e:
-        logger.error(f"Erreur init Drive : {e}")
+        logger.error(f"Erreur Service Account: {type(e).__name__}: {e}")
         return None
 
 
 def is_drive_enabled() -> bool:
-    """True si Drive est correctement configuré."""
+    """Retourne True si Drive est configuré et accessible."""
     return (
         get_drive_client() is not None
         and bool(os.getenv("GOOGLE_DRIVE_PARENT_ID"))
     )
 
 
+def get_auth_mode() -> Optional[str]:
+    """Retourne 'oauth', 'service_account' ou None."""
+    get_drive_client()  # force l'init
+    return _auth_mode
+
+
 # ---------------------------------------------------------------------------
 # Opérations Drive
 # ---------------------------------------------------------------------------
-def _get_user_owner_email() -> Optional[str]:
-    """
-    Email du propriétaire humain (toi) qui possède le quota storage.
-    Défini via la variable DRIVE_OWNER_EMAIL (ex: andreptpt30@gmail.com).
-    """
-    return os.getenv("DRIVE_OWNER_EMAIL")
-
-
-def _ensure_user_has_access(file_id: str) -> bool:
-    """
-    Donne au user owner (toi) un accès Editor au fichier/dossier créé.
-    Ça garantit que le fichier est visible dans TON Drive perso,
-    et que le quota storage utilisé est le TIEN (pas celui du service account).
-    """
-    client = get_drive_client()
-    user_email = _get_user_owner_email()
-    if not client or not user_email:
-        return False
-    try:
-        client.permissions().create(
-            fileId=file_id,
-            body={
-                "type": "user",
-                "role": "writer",
-                "emailAddress": user_email,
-            },
-            sendNotificationEmail=False,
-            supportsAllDrives=True,
-        ).execute()
-        return True
-    except Exception as e:
-        logger.warning(f"Permission share échouée pour {file_id} → {user_email}: {e}")
-        return False
-
-
 def create_batch_folder(batch_name: str) -> Optional[str]:
     """
     Crée un sous-dossier dans le dossier parent Drive.
@@ -135,11 +139,8 @@ def create_batch_folder(batch_name: str) -> Optional[str]:
             fields="id, webViewLink",
             supportsAllDrives=True,
         ).execute()
-        folder_id = folder["id"]
-        # Partage avec l'utilisateur propriétaire pour qu'il voit le dossier
-        _ensure_user_has_access(folder_id)
-        logger.info(f"Dossier Drive créé : {batch_name} -> {folder_id}")
-        return folder_id
+        logger.info(f"Dossier Drive créé : {batch_name} -> {folder['id']}")
+        return folder["id"]
     except Exception as e:
         logger.error(f"Erreur création dossier Drive : {e}")
         return None
@@ -164,7 +165,7 @@ def upload_file(
         return None
 
     try:
-        _, _, MediaFileUpload, _ = _load_google_libs()
+        _, _, _, _, MediaFileUpload, _ = _load_google_libs()
         metadata = {
             "name": local_path.name,
             "parents": [folder_id],
@@ -179,9 +180,6 @@ def upload_file(
             fields="id, name, webViewLink",
             supportsAllDrives=True,
         ).execute()
-        # Partage le fichier avec le user owner pour qu'il soit visible dans son Drive
-        # (et que son quota storage soit utilisé)
-        _ensure_user_has_access(result["id"])
         logger.info(f"upload_file: OK {local_path.name} → {result.get('id')}")
         return result
     except Exception as e:
@@ -202,39 +200,41 @@ def upload_csv(
     if not client or not rows:
         return None
 
+    # Construit le CSV en mémoire
+    buf = io.StringIO()
+    all_keys = set()
+    for row in rows:
+        all_keys.update(row.keys())
+    fieldnames = sorted(all_keys)
+
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+
+    csv_bytes = buf.getvalue().encode("utf-8")
     try:
-        _, _, _, MediaIoBaseUpload = _load_google_libs()
-
-        # Génère le CSV en mémoire
-        buf = io.StringIO()
-        # Union de toutes les clés pour gérer des rows hétérogènes
-        fieldnames = []
-        for r in rows:
-            for k in r.keys():
-                if k not in fieldnames:
-                    fieldnames.append(k)
-        writer = csv.DictWriter(buf, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-        data = buf.getvalue().encode("utf-8")
-
+        _, _, _, _, _, MediaIoBaseUpload = _load_google_libs()
+        metadata = {
+            "name": filename,
+            "parents": [folder_id],
+        }
         media = MediaIoBaseUpload(
-            io.BytesIO(data), mimetype="text/csv", resumable=False
+            io.BytesIO(csv_bytes), mimetype="text/csv", resumable=False
         )
-        metadata = {"name": filename, "parents": [folder_id]}
         result = client.files().create(
             body=metadata,
             media_body=media,
-            fields="id, name, webViewLink",
+            fields="id, webViewLink",
             supportsAllDrives=True,
         ).execute()
         logger.info(f"CSV uploadé sur Drive : {filename}")
         return result
     except Exception as e:
-        logger.error(f"Erreur upload CSV : {e}")
+        logger.exception(f"Erreur upload CSV : {e}")
         return None
 
 
 def get_folder_link(folder_id: str) -> str:
-    """Construit l'URL publique du dossier Drive (pour l'afficher dans l'UI)."""
+    """Construit l'URL web d'un dossier Drive."""
     return f"https://drive.google.com/drive/folders/{folder_id}"
