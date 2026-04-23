@@ -201,7 +201,9 @@ async def process_one(
         "-ar", "44100",
         "-ac", "2",
         # Conteneur
-        "-movflags", "+faststart",
+        # +faststart : moov atom au début pour lecture instantanée
+        # +use_metadata_tags : autorise les tags Apple (com.apple.quicktime.*)
+        "-movflags", "+faststart+use_metadata_tags",
         "-shortest",
         # Métadonnées aléatoires (appliquées APRÈS -map_metadata -1)
         *meta_args,
