@@ -309,8 +309,10 @@
       <button class="btn" onclick="document.getElementById('fileInput').click()">Browse</button>
     </div>
     <div class="upload-row">
-      <label>Batch Name (VA) :</label>
-      <input type="text" id="batchName" placeholder="Ex: Sarah_22avril — crée un dossier Drive avec ce nom" />
+      <label>VA :</label>
+      <input type="text" id="vaName" placeholder="Ton prénom (ex: Sarah)" style="max-width: 200px;" />
+      <label>Batch Name :</label>
+      <input type="text" id="batchName" placeholder="Ex: 22avril_mix" />
       <div class="inline-toggle">
         <input type="checkbox" id="uploadDrive" checked />
         <label for="uploadDrive">Upload Drive</label>
@@ -544,6 +546,7 @@ async function generate() {
 
   const copies = parseInt(document.getElementById("copies").value, 10) || 1;
   const batchName = document.getElementById("batchName").value.trim();
+  const vaName = document.getElementById("vaName").value.trim();
   const uploadDrive = document.getElementById("uploadDrive").checked;
 
   const customRanges = {};
@@ -561,6 +564,7 @@ async function generate() {
   const formData = new FormData();
   files.forEach(f => formData.append("files", f));
   formData.append("batch_name", batchName);
+  formData.append("va_name", vaName);
   formData.append("copies_per_video", copies);
   formData.append("concurrency", parseInt(document.getElementById("concurrency").value, 10) || 4);
   formData.append("upload_to_drive", uploadDrive ? "true" : "false");
@@ -700,6 +704,18 @@ function renderResults(data) {
 buildParamsGrid();
 checkDriveStatus();
 updatePreview();
+
+// Persistance du nom VA
+const vaInput = document.getElementById("vaName");
+if (vaInput) {
+  // Charge depuis localStorage
+  const savedVa = localStorage.getItem("repurpose_va_name");
+  if (savedVa) vaInput.value = savedVa;
+  // Sauvegarde à chaque modification
+  vaInput.addEventListener("input", () => {
+    localStorage.setItem("repurpose_va_name", vaInput.value.trim());
+  });
+}
 </script>
 </body>
 </html>
