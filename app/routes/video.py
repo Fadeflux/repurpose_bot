@@ -3,6 +3,7 @@ import asyncio
 import json
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -24,6 +25,14 @@ from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/api", tags=["video"])
 logger = get_logger("routes")
+
+
+# ---------------------------------------------------------------------------
+# Thread pool dédié aux uploads Drive : permet de paralléliser vraiment
+# les uploads sans bloquer le pool default asyncio (qui est déjà pris par
+# d'autres IO bloquants).
+# ---------------------------------------------------------------------------
+_drive_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="drive-up")
 
 
 # ---------------------------------------------------------------------------
@@ -238,14 +247,16 @@ async def _async_drive_upload(result: dict, folder_id: str, batch_id: str = None
     """Upload un fichier vers Drive en arrière-plan. Modifie result in-place."""
     try:
         loop = asyncio.get_event_loop()
+        # Utilise le pool dédié pour VRAIMENT paralléliser (pas bloquer le pool default)
         res = await loop.run_in_executor(
-            None, upload_file, Path(result["path"]), folder_id
+            _drive_executor, upload_file, Path(result["path"]), folder_id
         )
         if res:
             result["drive_url"] = res.get("webViewLink")
             result["drive_id"] = res.get("id")
             if batch_id:
                 _update_progress(batch_id, uploaded_delta=1)
+                logger.info(f"[{batch_id}] Drive upload done: {result.get('filename')}")
     except Exception as e:
         logger.warning(f"Drive upload échoué pour {result.get('filename')}: {e}")
 
@@ -366,6 +377,17 @@ async def process_endpoint(
         for src_idx, src in enumerate(src_paths):
             source_label = files[src_idx].filename or src.name
             per_video_job_id = f"{full_batch_id}_v{src_idx:03d}"
+
+            # Callback : dès qu'une copie est finie, on lance son upload Drive
+            def _on_copy_ready(r: dict, src_label=source_label, src_i=src_idx):
+                r["source_file"] = src_label
+                r["source_index"] = src_i + 1
+                if r.get("success") and drive_folder_id:
+                    task = asyncio.create_task(
+                        _async_drive_upload(r, drive_folder_id, full_batch_id)
+                    )
+                    drive_upload_tasks.append(task)
+
             results = await process_video(
                 source=src,
                 copies=copies_per_video,
@@ -374,16 +396,8 @@ async def process_endpoint(
                 custom_ranges=parsed_ranges,
                 enabled_filters=parsed_filters,
                 device_choice=device_choice,
+                on_copy_done=_on_copy_ready,
             )
-            for r in results:
-                r["source_file"] = source_label
-                r["source_index"] = src_idx + 1
-                # Lance l'upload Drive en background SI succès + Drive activé
-                if r.get("success") and drive_folder_id:
-                    task = asyncio.create_task(
-                        _async_drive_upload(r, drive_folder_id, full_batch_id)
-                    )
-                    drive_upload_tasks.append(task)
             all_results.extend(results)
     except RuntimeError as e:
         logger.error(f"[{full_batch_id}] {e}")
