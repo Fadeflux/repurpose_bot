@@ -143,6 +143,7 @@ async def process_one(
     params: Dict[str, Optional[float]],
     job_id: str,
     copy_index: int,
+    device_choice: str = "mix_random",
 ) -> Dict:
     """Génère une copie avec les paramètres donnés."""
     out_name = f"{job_id}_copy{copy_index:02d}_{uuid.uuid4().hex[:8]}.mp4"
@@ -166,7 +167,7 @@ async def process_one(
     bitrate = int(params.get("bitrate") or 10000)
 
     # Métadonnées aléatoires + stripping des métadonnées source
-    meta = random_metadata()
+    meta = random_metadata(device_choice)
     meta_args = metadata_to_ffmpeg_args(meta)
 
     cmd: List[str] = [
@@ -288,6 +289,7 @@ async def process_video(
     concurrency: int = 2,
     custom_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
     enabled_filters: Optional[List[str]] = None,
+    device_choice: str = "mix_random",
 ) -> List[Dict]:
     """Génère `copies` variantes randomisées de la vidéo source."""
     if not shutil.which("ffmpeg"):
@@ -296,7 +298,7 @@ async def process_video(
     duration = await probe_duration(source)
     logger.info(
         f"[{job_id}] source={source.name} duration={duration}s copies={copies} "
-        f"filters={enabled_filters or 'all'}"
+        f"filters={enabled_filters or 'all'} device={device_choice}"
     )
 
     sem = asyncio.Semaphore(concurrency)
@@ -307,7 +309,7 @@ async def process_video(
                 custom_ranges=custom_ranges,
                 enabled_filters=enabled_filters,
             )
-            return await process_one(source, duration, params, job_id, idx)
+            return await process_one(source, duration, params, job_id, idx, device_choice)
 
     tasks = [_run(i + 1) for i in range(copies)]
     return await asyncio.gather(*tasks)
