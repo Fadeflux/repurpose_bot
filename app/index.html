@@ -328,6 +328,16 @@
       <input type="number" id="copies" value="1" min="1" max="100" onchange="updatePreview()" />
       <span class="total-preview" id="totalPreview">0 vidéos × 1 copie = <strong>0 total</strong></span>
     </div>
+    <div class="copies-box" style="flex: 0 0 auto;">
+      <label>Speed :</label>
+      <select id="concurrency" style="background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer;">
+        <option value="1">🐢 Lent (1 parallèle)</option>
+        <option value="2">🚶 Normal (2 parallèles)</option>
+        <option value="3">🏃 Rapide (3 parallèles)</option>
+        <option value="4" selected>⚡ Ultra (4 parallèles)</option>
+        <option value="6">🚀 Max (6 parallèles, risque surchauffe)</option>
+      </select>
+    </div>
   </div>
 
   <button class="btn btn-primary" id="generateBtn" onclick="generate()">Generate</button>
@@ -483,7 +493,7 @@ async function generate() {
   files.forEach(f => formData.append("files", f));
   formData.append("batch_name", batchName);
   formData.append("copies_per_video", copies);
-  formData.append("concurrency", 2);
+  formData.append("concurrency", parseInt(document.getElementById("concurrency").value, 10) || 4);
   formData.append("upload_to_drive", uploadDrive ? "true" : "false");
   formData.append("custom_ranges", JSON.stringify(customRanges));
   formData.append("enabled_filters", JSON.stringify(enabledFilters));
