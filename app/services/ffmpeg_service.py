@@ -79,7 +79,8 @@ def build_filter_complex(params: Dict[str, Optional[float]]) -> str:
         crop_w -= crop_w % 2
         crop_h -= crop_h % 2
         filters.append(f"crop={crop_w}:{crop_h}")
-        filters.append(f"scale={W}:{H}:flags=lanczos")
+        # bicubic : ~30% plus rapide que lanczos, qualité très proche
+        filters.append(f"scale={W}:{H}:flags=bicubic")
         filters.append("setsar=1:1")
 
     # Rotation (optionnelle) — appliquée AVANT le crop final pour ne pas casser l'aspect
@@ -184,6 +185,7 @@ async def process_one(
         # Encodage vidéo
         "-c:v", settings.VIDEO_ENCODER,
         "-preset", settings.PRESET,
+        "-tune", settings.TUNE,         # fastdecode : optimise pour lecture TikTok/mobile
         "-profile:v", settings.VIDEO_PROFILE,
         "-level:v", "4.2",
         "-b:v", f"{bitrate}k",
@@ -195,6 +197,8 @@ async def process_one(
         "-colorspace", "bt709",
         # Force framerate de sortie (en plus du filtre fps)
         "-r", str(settings.TARGET_FPS),
+        # Threads : 0 = auto (ffmpeg utilise tous les cores dispo)
+        "-threads", "0",
         # Audio
         "-c:a", settings.AUDIO_CODEC,
         "-b:a", settings.AUDIO_BITRATE,
