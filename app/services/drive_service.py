@@ -118,6 +118,11 @@ def upload_file(
     """
     client = get_drive_client()
     if not client:
+        logger.error(f"upload_file: client Drive non initialisé pour {local_path.name}")
+        return None
+
+    if not local_path.exists():
+        logger.error(f"upload_file: fichier inexistant {local_path}")
         return None
 
     try:
@@ -126,6 +131,9 @@ def upload_file(
             "name": local_path.name,
             "parents": [folder_id],
         }
+        file_size_mb = local_path.stat().st_size / 1024 / 1024
+        logger.info(f"upload_file: début upload {local_path.name} ({file_size_mb:.2f} MB) vers {folder_id}")
+
         media = MediaFileUpload(str(local_path), mimetype=mime_type, resumable=True)
         result = client.files().create(
             body=metadata,
@@ -133,10 +141,11 @@ def upload_file(
             fields="id, name, webViewLink",
             supportsAllDrives=True,
         ).execute()
-        logger.info(f"Uploadé sur Drive : {local_path.name}")
+        logger.info(f"upload_file: OK {local_path.name} → {result.get('id')}")
         return result
     except Exception as e:
-        logger.error(f"Erreur upload Drive {local_path.name} : {e}")
+        # Log complet avec traceback pour diagnostic
+        logger.exception(f"upload_file: ÉCHEC {local_path.name} : {type(e).__name__}: {e}")
         return None
 
 
