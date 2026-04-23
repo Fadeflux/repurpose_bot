@@ -17,21 +17,25 @@ for d in (UPLOAD_DIR, OUTPUT_DIR, LOG_DIR):
 
 class Settings(BaseSettings):
     APP_NAME: str = "Repurpose Bot API"
-    VERSION: str = "2.0.0"
+    VERSION: str = "2.1.0"
 
     # Limites upload
-    MAX_UPLOAD_MB: int = 500               # par fichier
-    MAX_FILES_PER_REQUEST: int = 200       # nb max de vidéos sources
+    MAX_UPLOAD_MB: int = 500
+    MAX_FILES_PER_REQUEST: int = 200
     ALLOWED_EXTENSIONS: set = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
 
     # Nombre max de copies par vidéo source
     MAX_COPIES_PER_REQUEST: int = 100
 
-    # Encodeur par défaut (libx264 = CPU, compatible partout)
+    # Framerate cible fixe (60 fps = qualité max TikTok, pas de valeurs suspectes)
+    TARGET_FPS: int = 60
+
+    # Encodeur
     VIDEO_ENCODER: str = "libx264"
-    PRESET: str = "veryfast"
+    PRESET: str = "medium"         # medium > veryfast pour meilleure qualité
+    VIDEO_PROFILE: str = "high"
     AUDIO_CODEC: str = "aac"
-    AUDIO_BITRATE: str = "128k"
+    AUDIO_BITRATE: str = "192k"    # augmenté pour matcher les sources TikTok
 
     # Format cible TikTok vertical
     TARGET_WIDTH: int = 1080
@@ -44,9 +48,9 @@ settings = Settings()
 # ---------------------------------------------------------------------------
 # Bornes des paramètres de randomisation (min, max)
 # ---------------------------------------------------------------------------
+# Note: framerate retiré — on le force à 60 fps systématiquement pour la qualité
 PARAM_RANGES = {
-    "framerate":  (30, 60),
-    "bitrate":    (5000, 6000),
+    "bitrate":    (8000, 12000),         # kbps (bien plus haut qu'avant, proche des sources TikTok)
     "brightness": (-0.05, 0.05),
     "contrast":   (0.95, 1.10),
     "saturation": (0.95, 1.15),
