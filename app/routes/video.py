@@ -20,6 +20,10 @@ from app.services.drive_service import (
     upload_csv,
     upload_file,
 )
+from app.services.discord_service import (
+    is_discord_enabled,
+    send_batch_notification,
+)
 from app.services.ffmpeg_service import process_video
 from app.utils.logger import get_logger
 
@@ -67,6 +71,7 @@ async def health():
         "app": settings.APP_NAME,
         "version": settings.VERSION,
         "drive_enabled": is_drive_enabled(),
+        "discord_enabled": is_discord_enabled(),
     }
 
 
@@ -269,6 +274,7 @@ async def process_endpoint(
     concurrency: int = Form(4, ge=1, le=6, description="Processus ffmpeg parallèles"),
     upload_to_drive: bool = Form(True, description="Envoyer sur Google Drive"),
     device_choice: str = Form("mix_random", description="Type de device à simuler"),
+    va_name: str = Form("", description="Nom du VA qui lance le batch"),
     custom_ranges: Optional[str] = Form(None),
     enabled_filters: Optional[str] = Form(None),
 ):
@@ -313,7 +319,15 @@ async def process_endpoint(
         raise HTTPException(status_code=400, detail=f"JSON invalide: {e}") from e
 
     # -- Préparation batch ---------------------------------------------------
-    batch_slug = _sanitize_batch_name(batch_name)
+    import time
+    batch_start_time = time.time()
+    va_slug = _sanitize_batch_name(va_name) if va_name else ""
+    base_slug = _sanitize_batch_name(batch_name)
+    # Construit le nom complet : [VA_] nom_batch
+    if va_slug:
+        batch_slug = f"{va_slug}_{base_slug}"
+    else:
+        batch_slug = base_slug
     job_id = uuid.uuid4().hex[:8]
     full_batch_id = f"{batch_slug}_{job_id}"
 
@@ -420,6 +434,7 @@ async def process_endpoint(
 
     success = [r for r in all_results if r.get("success")]
     failed = [r for r in all_results if not r.get("success")]
+    retries_used = sum(1 for r in success if r.get("was_retried"))
 
     # Upload CSV de métadonnées (après tout le reste)
     drive_uploads_count = sum(1 for r in success if r.get("drive_url"))
@@ -427,9 +442,12 @@ async def process_endpoint(
         csv_rows = []
         for r in all_results:
             row = {
+                "va_name": va_name or "",
                 "source_file": r.get("source_file"),
                 "copy_index": r.get("copy_index"),
                 "success": r.get("success"),
+                "attempt": r.get("attempt", 1),
+                "was_retried": r.get("was_retried", False),
                 "output_filename": r.get("filename", ""),
                 "drive_url": r.get("drive_url", ""),
                 "size_bytes": r.get("size_bytes", ""),
@@ -445,15 +463,36 @@ async def process_endpoint(
             None, upload_csv, drive_folder_id, csv_rows, "metadata.csv"
         )
 
+    # Notif Discord (non bloquante)
+    duration = time.time() - batch_start_time
+    try:
+        await send_batch_notification(
+            va_name=va_name,
+            batch_name=batch_slug,
+            total_requested=len(files) * copies_per_video,
+            succeeded=len(success),
+            failed=len(failed),
+            drive_uploaded=drive_uploads_count,
+            retries_used=retries_used,
+            duration_seconds=duration,
+            device_choice=device_choice,
+            drive_folder_url=drive_folder_link,
+        )
+    except Exception as e:
+        logger.warning(f"Discord notif failed: {e}")
+
     return JSONResponse(
         content={
             "batch_id": full_batch_id,
             "batch_name": batch_slug,
+            "va_name": va_name,
             "sources_count": len(files),
             "copies_per_video": copies_per_video,
             "total_requested": len(files) * copies_per_video,
             "succeeded": len(success),
             "failed": len(failed),
+            "retries_used": retries_used,
+            "duration_seconds": round(duration, 1),
             "drive": {
                 "enabled": bool(drive_folder_id),
                 "folder_id": drive_folder_id,
