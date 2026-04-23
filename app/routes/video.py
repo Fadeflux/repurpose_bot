@@ -52,15 +52,27 @@ async def drive_debug():
     Utilisé pour diagnostiquer les problèmes d'upload.
     """
     import os
-    from app.services.drive_service import get_drive_client
+    from app.services.drive_service import get_drive_client, get_auth_mode
+
+    oauth_raw = os.getenv("GOOGLE_OAUTH_TOKEN_JSON") or ""
+    creds_raw = os.getenv("GOOGLE_CREDENTIALS_JSON") or ""
 
     result = {
         "env_vars": {
-            "GOOGLE_CREDENTIALS_JSON": bool(os.getenv("GOOGLE_CREDENTIALS_JSON")),
+            "GOOGLE_OAUTH_TOKEN_JSON": {
+                "present": bool(oauth_raw),
+                "length": len(oauth_raw),
+                "starts_with": oauth_raw[:20] if oauth_raw else None,
+            },
+            "GOOGLE_CREDENTIALS_JSON": {
+                "present": bool(creds_raw),
+                "length": len(creds_raw),
+            },
             "GOOGLE_DRIVE_PARENT_ID": os.getenv("GOOGLE_DRIVE_PARENT_ID") or None,
         },
         "drive_enabled": is_drive_enabled(),
         "client_initialized": False,
+        "auth_mode": None,
         "service_account_email": None,
         "test_folder_creation": None,
         "test_file_upload": None,
@@ -74,6 +86,7 @@ async def drive_debug():
             result["errors"].append("get_drive_client() a retourné None")
             return result
         result["client_initialized"] = True
+        result["auth_mode"] = get_auth_mode()  # "oauth" ou "service_account"
     except Exception as e:
         result["errors"].append(f"Erreur init client: {type(e).__name__}: {e}")
         return result
