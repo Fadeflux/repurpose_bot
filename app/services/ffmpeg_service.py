@@ -230,6 +230,17 @@ async def process_one(
             "metadata": meta,
         }
 
+    # Post-processing : patch les creation_time des streams pour qu'ils soient distincts
+    # (FFmpeg écrase les timings stream avec le format par défaut, on contourne)
+    try:
+        from app.utils.mp4_patcher import patch_mp4_creation_times, parse_iso_datetime
+        fmt_dt = parse_iso_datetime(meta["creation_time"])
+        vid_dt = parse_iso_datetime(meta["_video_creation_time"])
+        aud_dt = parse_iso_datetime(meta["_audio_creation_time"])
+        patch_mp4_creation_times(out_path, fmt_dt, vid_dt, aud_dt)
+    except Exception as e:
+        logger.warning(f"[{job_id}] Patch MP4 échoué (non bloquant): {e}")
+
     return {
         "copy_index": copy_index,
         "success": True,
