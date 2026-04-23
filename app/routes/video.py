@@ -61,7 +61,7 @@ async def process_endpoint(
     files: List[UploadFile] = File(..., description="Une ou plusieurs vidéos sources"),
     batch_name: str = Form("", description="Nom du batch (sous-dossier Drive)"),
     copies_per_video: int = Form(1, ge=1, description="Nombre de variantes par vidéo"),
-    concurrency: int = Form(2, ge=1, le=4, description="Processus ffmpeg parallèles"),
+    concurrency: int = Form(3, ge=1, le=6, description="Processus ffmpeg parallèles"),
     upload_to_drive: bool = Form(True, description="Envoyer sur Google Drive"),
     custom_ranges: Optional[str] = Form(None),
     enabled_filters: Optional[str] = Form(None),
