@@ -313,18 +313,39 @@ async def process_video(
 
     async def _run(idx: int):
         async with sem:
-            params = random_params(
-                custom_ranges=custom_ranges,
-                enabled_filters=enabled_filters,
-            )
-            result = await process_one(source, duration, params, job_id, idx, device_choice)
+            # Auto-retry : jusqu'à 3 tentatives avec backoff exponentiel
+            last_result = None
+            for attempt in range(1, 4):
+                params = random_params(
+                    custom_ranges=custom_ranges,
+                    enabled_filters=enabled_filters,
+                )
+                result = await process_one(source, duration, params, job_id, idx, device_choice)
+                last_result = result
+                if result.get("success"):
+                    result["attempt"] = attempt
+                    if attempt > 1:
+                        result["was_retried"] = True
+                        logger.info(f"[{job_id}] copy {idx} réussie à la tentative {attempt}")
+                    break
+                # Échec → attente avant retry (sauf si dernière tentative)
+                if attempt < 3:
+                    backoff = 2 ** (attempt - 1)  # 1s, 2s
+                    logger.warning(f"[{job_id}] copy {idx} échouée (tentative {attempt}), retry dans {backoff}s")
+                    await asyncio.sleep(backoff)
+            else:
+                # Toutes les tentatives ont échoué
+                last_result["attempt"] = 3
+                last_result["was_retried"] = True
+                logger.error(f"[{job_id}] copy {idx} définitivement échouée après 3 tentatives")
+
             # Callback immédiat : permet de démarrer l'upload Drive sans attendre
             if on_copy_done is not None:
                 try:
-                    on_copy_done(result)
+                    on_copy_done(last_result)
                 except Exception as e:
                     logger.warning(f"[{job_id}] on_copy_done callback error: {e}")
-            return result
+            return last_result
 
     tasks = [_run(i + 1) for i in range(copies)]
     return await asyncio.gather(*tasks)
