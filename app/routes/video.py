@@ -132,28 +132,32 @@ async def process_endpoint(
             drive_folder_link = get_folder_link(drive_folder_id)
             logger.info(f"[{full_batch_id}] Drive folder: {drive_folder_link}")
 
-    # -- Sauvegarde des fichiers sources ------------------------------------
+    # -- Sauvegarde des fichiers sources (EN PARALLÈLE) ----------------------
     src_paths: List[Path] = []
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
 
+    async def _save_one(idx: int, f: UploadFile) -> Path:
+        """Sauvegarde un fichier source en streaming."""
+        ext = Path(f.filename or "").suffix.lower()
+        safe_orig = re.sub(r"[^\w\-.]", "_", Path(f.filename or f"src{idx}").stem)
+        src_path = UPLOAD_DIR / f"{full_batch_id}_{idx:03d}_{safe_orig}{ext}"
+        written = 0
+        async with aiofiles.open(src_path, "wb") as out:
+            while chunk := await f.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    await out.close()
+                    src_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Fichier trop volumineux ({f.filename}).",
+                    )
+                await out.write(chunk)
+        return src_path
+
     try:
-        for idx, f in enumerate(files):
-            ext = Path(f.filename or "").suffix.lower()
-            safe_orig = re.sub(r"[^\w\-.]", "_", Path(f.filename or f"src{idx}").stem)
-            src_path = UPLOAD_DIR / f"{full_batch_id}_{idx:03d}_{safe_orig}{ext}"
-            written = 0
-            async with aiofiles.open(src_path, "wb") as out:
-                while chunk := await f.read(1024 * 1024):
-                    written += len(chunk)
-                    if written > max_bytes:
-                        await out.close()
-                        src_path.unlink(missing_ok=True)
-                        raise HTTPException(
-                            status_code=413,
-                            detail=f"Fichier trop volumineux ({f.filename}).",
-                        )
-                    await out.write(chunk)
-            src_paths.append(src_path)
+        # Parallélise l'écriture sur disque des fichiers sources (gain sur gros batchs)
+        src_paths = await asyncio.gather(*[_save_one(i, f) for i, f in enumerate(files)])
         logger.info(f"[{full_batch_id}] {len(src_paths)} vidéo(s) uploadée(s)")
     except HTTPException:
         for p in src_paths:
