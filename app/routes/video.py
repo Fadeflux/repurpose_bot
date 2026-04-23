@@ -50,10 +50,23 @@ def _sanitize_batch_name(name: str) -> str:
     name = name.strip()
     if not name:
         name = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    # Remplace tout caractère chelou par _
     name = re.sub(r"[^\w\s\-]", "_", name, flags=re.UNICODE)
     name = re.sub(r"\s+", "_", name)
     return name[:80]
+
+
+async def _async_drive_upload(result: dict, folder_id: str) -> None:
+    """Upload un fichier vers Drive en arrière-plan. Modifie result in-place."""
+    try:
+        loop = asyncio.get_event_loop()
+        res = await loop.run_in_executor(
+            None, upload_file, Path(result["path"]), folder_id
+        )
+        if res:
+            result["drive_url"] = res.get("webViewLink")
+            result["drive_id"] = res.get("id")
+    except Exception as e:
+        logger.warning(f"Drive upload échoué pour {result.get('filename')}: {e}")
 
 
 @router.post("/process")
@@ -68,8 +81,9 @@ async def process_endpoint(
 ):
     """
     Upload une ou plusieurs vidéos, génère des variantes randomisées,
-    et (optionnellement) uploade le tout sur Google Drive dans un sous-dossier
-    nommé avec `batch_name`.
+    et (optionnellement) uploade le tout sur Google Drive en pipeline parallèle :
+    dès qu'une vidéo est encodée, elle part sur Drive pendant que ffmpeg
+    continue à traiter les suivantes.
     """
     # -- Validations ---------------------------------------------------------
     if not files:
@@ -110,7 +124,6 @@ async def process_endpoint(
     job_id = uuid.uuid4().hex[:8]
     full_batch_id = f"{batch_slug}_{job_id}"
 
-    # Dossier Drive (optionnel)
     drive_folder_id = None
     drive_folder_link = None
     if upload_to_drive and is_drive_enabled():
@@ -118,8 +131,6 @@ async def process_endpoint(
         if drive_folder_id:
             drive_folder_link = get_folder_link(drive_folder_id)
             logger.info(f"[{full_batch_id}] Drive folder: {drive_folder_link}")
-        else:
-            logger.warning(f"[{full_batch_id}] Création dossier Drive échouée")
 
     # -- Sauvegarde des fichiers sources ------------------------------------
     src_paths: List[Path] = []
@@ -154,8 +165,12 @@ async def process_endpoint(
             p.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Erreur upload: {e}") from e
 
-    # -- Traitement ----------------------------------------------------------
-    all_results = []
+    # -- PIPELINE : ffmpeg + Drive upload en parallèle ----------------------
+    # Dès qu'une vidéo est encodée, on lance son upload Drive sans attendre
+    # les autres. Gros gain de temps sur les gros batchs.
+    all_results: List[dict] = []
+    drive_upload_tasks: List[asyncio.Task] = []
+
     try:
         for src_idx, src in enumerate(src_paths):
             source_label = files[src_idx].filename or src.name
@@ -168,10 +183,13 @@ async def process_endpoint(
                 custom_ranges=parsed_ranges,
                 enabled_filters=parsed_filters,
             )
-            # On annote chaque résultat avec la source
             for r in results:
                 r["source_file"] = source_label
                 r["source_index"] = src_idx + 1
+                # Lance l'upload Drive en background SI succès + Drive activé
+                if r.get("success") and drive_folder_id:
+                    task = asyncio.create_task(_async_drive_upload(r, drive_folder_id))
+                    drive_upload_tasks.append(task)
             all_results.extend(results)
     except RuntimeError as e:
         logger.error(f"[{full_batch_id}] {e}")
@@ -180,37 +198,20 @@ async def process_endpoint(
         logger.exception(f"[{full_batch_id}] Erreur traitement")
         raise HTTPException(status_code=500, detail=f"Erreur traitement: {e}") from e
     finally:
-        # On purge les sources pour économiser le disque
         for p in src_paths:
             p.unlink(missing_ok=True)
+
+    # Attendre que TOUS les uploads Drive en cours soient terminés
+    if drive_upload_tasks:
+        logger.info(f"[{full_batch_id}] Finalisation {len(drive_upload_tasks)} uploads Drive")
+        await asyncio.gather(*drive_upload_tasks, return_exceptions=True)
 
     success = [r for r in all_results if r.get("success")]
     failed = [r for r in all_results if not r.get("success")]
 
-    # -- Upload Drive --------------------------------------------------------
-    drive_uploads: List[dict] = []
+    # Upload CSV de métadonnées (après tout le reste)
+    drive_uploads_count = sum(1 for r in success if r.get("drive_url"))
     if drive_folder_id and success:
-        logger.info(f"[{full_batch_id}] Upload Drive de {len(success)} vidéos")
-
-        # Upload parallélisé mais limité (3 à la fois)
-        sem = asyncio.Semaphore(3)
-
-        async def _upload(r):
-            async with sem:
-                loop = asyncio.get_event_loop()
-                res = await loop.run_in_executor(
-                    None, upload_file, Path(r["path"]), drive_folder_id
-                )
-                if res:
-                    r["drive_url"] = res.get("webViewLink")
-                    r["drive_id"] = res.get("id")
-                    return {"filename": r["filename"], "drive_url": res.get("webViewLink")}
-                return None
-
-        upload_results = await asyncio.gather(*[_upload(r) for r in success])
-        drive_uploads = [u for u in upload_results if u]
-
-        # CSV de métadonnées
         csv_rows = []
         for r in all_results:
             row = {
@@ -222,7 +223,6 @@ async def process_endpoint(
                 "size_bytes": r.get("size_bytes", ""),
                 "error": (r.get("error", "") or "")[:300],
             }
-            # Aplatit les params
             params = r.get("params") or {}
             for k, v in params.items():
                 row[f"param_{k}"] = v if v is not None else ""
@@ -246,7 +246,7 @@ async def process_endpoint(
                 "enabled": bool(drive_folder_id),
                 "folder_id": drive_folder_id,
                 "folder_url": drive_folder_link,
-                "uploaded": len(drive_uploads),
+                "uploaded": drive_uploads_count,
             },
             "results": all_results,
             "download_base_url": "/api/download/",
