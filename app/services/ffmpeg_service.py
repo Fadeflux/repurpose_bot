@@ -290,8 +290,16 @@ async def process_video(
     custom_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
     enabled_filters: Optional[List[str]] = None,
     device_choice: str = "mix_random",
+    on_copy_done=None,
 ) -> List[Dict]:
-    """Génère `copies` variantes randomisées de la vidéo source."""
+    """
+    Génère `copies` variantes randomisées de la vidéo source.
+    
+    Args:
+        on_copy_done: Callback optionnel appelé dès qu'une copie est prête.
+            Signature: on_copy_done(result_dict). Permet de lancer un upload Drive
+            immédiatement sans attendre la fin des autres copies.
+    """
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg introuvable dans le PATH.")
 
@@ -309,7 +317,14 @@ async def process_video(
                 custom_ranges=custom_ranges,
                 enabled_filters=enabled_filters,
             )
-            return await process_one(source, duration, params, job_id, idx, device_choice)
+            result = await process_one(source, duration, params, job_id, idx, device_choice)
+            # Callback immédiat : permet de démarrer l'upload Drive sans attendre
+            if on_copy_done is not None:
+                try:
+                    on_copy_done(result)
+                except Exception as e:
+                    logger.warning(f"[{job_id}] on_copy_done callback error: {e}")
+            return result
 
     tasks = [_run(i + 1) for i in range(copies)]
     return await asyncio.gather(*tasks)
