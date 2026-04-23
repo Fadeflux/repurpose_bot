@@ -1,13 +1,13 @@
 """
-Générateur de métadonnées simulant un vrai iPhone.
+Générateur de métadonnées simulant un vrai iPhone OU un vrai Android.
 
 Chaque appel produit une signature COMPLÈTEMENT UNIQUE :
-- Modèle iPhone random (avec version iOS cohérente)
-- Géoloc random (150+ coordonnées de villes monde)
-- Dates randomisées avec léger décalage entre format et streams
-- Encoder string random (version iOS différente à chaque fois)
-- Tous les tags Apple QuickTime complets
-- Make/model/software cohérents entre eux
+- 50% iPhone / 50% Android (random à chaque vidéo)
+- Modèle + OS cohérent avec la marque
+- Géoloc random (100+ coordonnées de villes monde) avec jitter
+- Dates randomisées avec décalage format/streams
+- UUID + encoder version uniques
+- Tags spécifiques à la plateforme (QuickTime pour Apple, Android tags sinon)
 """
 import random
 import uuid
@@ -16,22 +16,53 @@ from typing import Dict
 
 
 # ---------------------------------------------------------------------------
-# Catalogue iPhone + iOS (cohérent) — iPhone 16 et 17 uniquement
-# Versions iOS à jour avril 2026
+# Catalogue iPhone 16/17 avec iOS cohérent (version avril 2026)
 # ---------------------------------------------------------------------------
 IPHONE_MODELS = [
-    # iPhone 17 family (sortie septembre 2025, tourne sur iOS 26)
+    # iPhone 17 family (sortie septembre 2025, iOS 26)
     ("iPhone 17 Pro Max", ["26.0", "26.0.1", "26.1", "26.1.1", "26.2", "26.3", "26.3.1", "26.4", "26.4.1"]),
     ("iPhone 17 Pro",     ["26.0", "26.0.1", "26.1", "26.1.1", "26.2", "26.3", "26.3.1", "26.4", "26.4.1"]),
     ("iPhone 17 Air",     ["26.0", "26.0.1", "26.1", "26.1.1", "26.2", "26.3", "26.3.1", "26.4", "26.4.1"]),
     ("iPhone 17",         ["26.0", "26.0.1", "26.1", "26.1.1", "26.2", "26.3", "26.3.1", "26.4", "26.4.1"]),
-    # iPhone 16 family (sortie septembre 2024, tourne sur iOS 18 puis 26)
-    ("iPhone 16 Pro Max", ["18.0", "18.0.1", "18.1", "18.1.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
-    ("iPhone 16 Pro",     ["18.0", "18.0.1", "18.1", "18.1.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
-    ("iPhone 16 Plus",    ["18.0", "18.0.1", "18.1", "18.1.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
-    ("iPhone 16",         ["18.0", "18.0.1", "18.1", "18.1.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
+    # iPhone 16 family (sortie septembre 2024, iOS 18 et 26)
+    ("iPhone 16 Pro Max", ["18.0", "18.0.1", "18.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
+    ("iPhone 16 Pro",     ["18.0", "18.0.1", "18.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
+    ("iPhone 16 Plus",    ["18.0", "18.0.1", "18.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
+    ("iPhone 16",         ["18.0", "18.0.1", "18.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
     ("iPhone 16e",        ["18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Catalogue Android haut de gamme cohérent (avril 2026)
+# Format : (make, model_code, marketing_name, Android versions)
+# ---------------------------------------------------------------------------
+ANDROID_MODELS = [
+    # Samsung Galaxy S25 family (sortie janvier 2025, Android 15/16)
+    ("samsung", "SM-S938B", "Galaxy S25 Ultra",  ["15", "16"]),
+    ("samsung", "SM-S936B", "Galaxy S25+",       ["15", "16"]),
+    ("samsung", "SM-S931B", "Galaxy S25",        ["15", "16"]),
+    # Samsung Galaxy S24 family (sortie janvier 2024, Android 14/15/16)
+    ("samsung", "SM-S928B", "Galaxy S24 Ultra",  ["14", "15", "16"]),
+    ("samsung", "SM-S926B", "Galaxy S24+",       ["14", "15", "16"]),
+    ("samsung", "SM-S921B", "Galaxy S24",        ["14", "15", "16"]),
+    # Samsung Galaxy S23 family (sortie 2023, Android 13/14/15)
+    ("samsung", "SM-S918B", "Galaxy S23 Ultra",  ["13", "14", "15"]),
+    ("samsung", "SM-S916B", "Galaxy S23+",       ["13", "14", "15"]),
+    ("samsung", "SM-S911B", "Galaxy S23",        ["13", "14", "15"]),
+    # Google Pixel 9 family (sortie août 2024, Android 14/15/16)
+    ("Google",  "Pixel 9 Pro XL", "Pixel 9 Pro XL", ["14", "15", "16"]),
+    ("Google",  "Pixel 9 Pro",    "Pixel 9 Pro",    ["14", "15", "16"]),
+    ("Google",  "Pixel 9",        "Pixel 9",        ["14", "15", "16"]),
+    # Google Pixel 8 family (sortie octobre 2023, Android 14/15)
+    ("Google",  "Pixel 8 Pro",    "Pixel 8 Pro",    ["14", "15"]),
+    ("Google",  "Pixel 8",        "Pixel 8",        ["14", "15"]),
+    # Xiaomi 15 family (sortie 2024/2025)
+    ("Xiaomi",  "24129PN74G",     "Xiaomi 15 Ultra", ["14", "15"]),
+    ("Xiaomi",  "2410FPN6DG",     "Xiaomi 15 Pro",   ["14", "15"]),
+    ("Xiaomi",  "2410FPN6DC",     "Xiaomi 15",       ["14", "15"]),
+]
+
 
 # Versions d'encoder Lavf / Lavc (vraies versions qui ont existé)
 LAVF_VERSIONS = [
@@ -46,11 +77,10 @@ LAVC_VERSIONS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Géolocalisation : 150+ villes dans le monde
-# (les coords seront jittered pour que chaque vidéo ait une loc unique)
+# Géolocalisation : 100+ villes dans le monde
 # ---------------------------------------------------------------------------
 CITY_COORDS = [
-    # USA (beaucoup pour crédibilité Insta/TikTok US)
+    # USA
     (40.7128, -74.0060),  (34.0522, -118.2437), (41.8781, -87.6298),
     (29.7604, -95.3698),  (33.4484, -112.0740), (39.9526,  -75.1652),
     (29.4241, -98.4936),  (32.7157, -117.1611), (32.7767,  -96.7970),
@@ -115,110 +145,353 @@ def _apple_uuid() -> str:
 
 
 def _format_iso6709(lat: float, lng: float, alt: float = 0.0) -> str:
-    """
-    Format ISO 6709 attendu par les containers Apple MP4.
-    Exemple Apple : +37.7749-122.4194+010.500/
-    """
+    """Format ISO 6709 attendu par les containers Apple MP4."""
     return f"{lat:+08.4f}{lng:+09.4f}{alt:+07.3f}/"
 
 
+def _format_iso6709_short(lat: float, lng: float) -> str:
+    """Format court ISO 6709 (Android utilise souvent ce format sans altitude)."""
+    return f"{lat:+08.4f}{lng:+09.4f}/"
+
+
 def _random_datetime() -> datetime:
-    """Date random dans les 365 derniers jours (pas trop récente, pas trop vieille)."""
+    """Date random dans les 365 derniers jours."""
     days_ago = random.randint(3, 365)
     seconds_ago = random.randint(0, 86400)
     return datetime.utcnow() - timedelta(days=days_ago, seconds=seconds_ago)
 
 
-# ---------------------------------------------------------------------------
-# Fonction principale
-# ---------------------------------------------------------------------------
-def random_metadata() -> Dict[str, str]:
-    """
-    Retourne un dict de métadonnées Apple COMPLET et UNIQUE.
-
-    Chaque appel génère :
-    - Un modèle iPhone random
-    - Une version iOS cohérente avec ce modèle
-    - Une géoloc random (parmi 100+ villes) avec jitter
-    - Une date random dans les 365 derniers jours
-    - Des identifiants uniques (UUID)
-    - Des versions d'encoder random
-    - Un décalage de 1-2ms entre format / streams (comme iPhone réel)
-    """
-    # Modèle iPhone + version iOS cohérente
-    model, ios_versions = random.choice(IPHONE_MODELS)
-    ios_version = random.choice(ios_versions)
-
-    # Géoloc avec petit jitter (la vidéo n'est pas pile au centre-ville)
-    base_lat, base_lng = random.choice(CITY_COORDS)
-    lat = base_lat + random.uniform(-0.05, 0.05)
-    lng = base_lng + random.uniform(-0.05, 0.05)
-    # Altitude réaliste (0-200m)
-    alt = random.uniform(0, 200)
-    location_str = _format_iso6709(lat, lng, alt)
-
-    # Date de création (format iPhone)
-    base_date = _random_datetime()
-    # Format ISO8601 UTC pour le container (comme iPhone)
+def _random_timings(base_date: datetime) -> Dict[str, str]:
+    """Génère les creation_time avec décalage format/video/audio."""
     format_time = base_date.strftime("%Y-%m-%dT%H:%M:%S.000000Z")
-    # Format Apple QuickTime (avec timezone +0000 au lieu de Z)
     apple_creationdate = base_date.strftime("%Y-%m-%dT%H:%M:%S+0000")
-    # Sur un vrai iPhone (décalages visibles au niveau seconde) :
-    #  - stream vidéo : démarre 1-3 secondes après le format (init camera)
-    #  - stream audio : démarre 1-3 secondes après la vidéo (init micro)
     video_offset = timedelta(seconds=random.randint(1, 3))
     audio_offset_extra = timedelta(seconds=random.randint(1, 2))
     v_stream_time = (base_date + video_offset).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
     a_stream_time = (base_date + video_offset + audio_offset_extra).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+    return {
+        "format_time": format_time,
+        "apple_creationdate": apple_creationdate,
+        "v_stream_time": v_stream_time,
+        "a_stream_time": a_stream_time,
+    }
 
-    # UUID unique pour identifiant contenu
+
+# ---------------------------------------------------------------------------
+# Générateur iPhone
+# ---------------------------------------------------------------------------
+def _iphone_metadata() -> Dict[str, str]:
+    """Métadonnées complètes pour simuler un iPhone 16/17."""
+    model, ios_versions = random.choice(IPHONE_MODELS)
+    ios_version = random.choice(ios_versions)
+
+    base_lat, base_lng = random.choice(CITY_COORDS)
+    lat = base_lat + random.uniform(-0.05, 0.05)
+    lng = base_lng + random.uniform(-0.05, 0.05)
+    alt = random.uniform(0, 200)
+    location_str = _format_iso6709(lat, lng, alt)
+
+    base_date = _random_datetime()
+    timings = _random_timings(base_date)
+
     content_uuid = _apple_uuid()
-
-    # Versions d'encoder random (change le "fingerprint" du serveur)
     lavf = random.choice(LAVF_VERSIONS)
     lavc = random.choice(LAVC_VERSIONS)
 
     return {
-        # ---- Stripping explicite des tags source ----
-        "comment": "",
-        "description": "",
-        "title": "",
-        "artist": "",
-        "album": "",
+        # Stripping
+        "comment": "", "description": "", "title": "", "artist": "", "album": "",
 
-        # ---- Identité de l'appareil (niveau format/container) ----
+        # Identité Apple
         "make": "Apple",
         "model": model,
         "com.apple.quicktime.make": "Apple",
         "com.apple.quicktime.model": model,
         "com.apple.quicktime.software": ios_version,
 
-        # ---- Géolocalisation (tous les formats possibles) ----
+        # Géoloc
         "location": location_str,
         "location-eng": location_str,
         "com.apple.quicktime.location.ISO6709": location_str,
         "com.apple.quicktime.location.accuracy.horizontal": f"{random.uniform(4.5, 15.0):.6f}",
 
-        # ---- Dates de création ----
-        "creation_time": format_time,
-        "date": format_time[:10],   # format YYYY-MM-DD
-        "com.apple.quicktime.creationdate": apple_creationdate,
+        # Dates
+        "creation_time": timings["format_time"],
+        "date": timings["format_time"][:10],
+        "com.apple.quicktime.creationdate": timings["apple_creationdate"],
 
-        # ---- Identifiants uniques (UUID) ----
+        # UUID
         "com.apple.quicktime.content.identifier": content_uuid,
 
-        # ---- Encoder (fingerprint serveur) — version random ----
+        # Encoder
         "encoder": f"Lavf{lavf}",
 
-        # ---- Stream-level tags (pour les pistes vidéo/audio) ----
-        # Timings décalés entre format / video / audio (comme vrai iPhone)
-        "_video_creation_time": v_stream_time,
-        "_audio_creation_time": a_stream_time,
+        # Clés privées
+        "_platform": "iphone",
+        "_video_creation_time": timings["v_stream_time"],
+        "_audio_creation_time": timings["a_stream_time"],
         "_stream_encoder_lavc": f"Lavc{lavc} libx264",
-        # Handler names comme un vrai iPhone
         "_video_handler_name": "Core Media Video",
         "_audio_handler_name": "Core Media Audio",
     }
+
+
+# ---------------------------------------------------------------------------
+# Générateur Android
+# ---------------------------------------------------------------------------
+def _android_metadata() -> Dict[str, str]:
+    """Métadonnées complètes pour simuler un Android récent (Samsung/Pixel/Xiaomi)."""
+    make, model_code, _marketing_name, android_versions = random.choice(ANDROID_MODELS)
+    android_version = random.choice(android_versions)
+
+    base_lat, base_lng = random.choice(CITY_COORDS)
+    lat = base_lat + random.uniform(-0.05, 0.05)
+    lng = base_lng + random.uniform(-0.05, 0.05)
+    # Android stocke souvent la loc sans altitude
+    location_str = _format_iso6709_short(lat, lng)
+
+    base_date = _random_datetime()
+    timings = _random_timings(base_date)
+
+    lavf = random.choice(LAVF_VERSIONS)
+    lavc = random.choice(LAVC_VERSIONS)
+
+    # Les téléphones Android enregistrent souvent en 30/60 fps avec com.android.capture.fps
+    capture_fps = random.choice([30.0, 60.0])
+
+    return {
+        # Stripping
+        "comment": "", "description": "", "title": "", "artist": "", "album": "",
+
+        # Identité Android
+        "make": make,
+        "model": model_code,
+        # Android-specific tags
+        "com.android.version": android_version,
+        "com.android.capture.fps": f"{capture_fps:.6f}",
+        "com.android.manufacturer": make,
+        "com.android.model": model_code,
+
+        # Géoloc (format court, sans altitude comme Android)
+        "location": location_str,
+        "location-eng": location_str,
+
+        # Dates
+        "creation_time": timings["format_time"],
+        "date": timings["format_time"][:10],
+
+        # Encoder
+        "encoder": f"Lavf{lavf}",
+
+        # Clés privées
+        "_platform": "android",
+        "_video_creation_time": timings["v_stream_time"],
+        "_audio_creation_time": timings["a_stream_time"],
+        "_stream_encoder_lavc": f"Lavc{lavc} libx264",
+        "_video_handler_name": "VideoHandle",
+        "_audio_handler_name": "SoundHandle",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Mapping des choix de device disponibles dans l'UI
+# ---------------------------------------------------------------------------
+# Clé = valeur envoyée par le frontend
+# Valeur = fonction qui retourne les metadata
+DEVICE_CHOICES = {
+    # Mix et catégories
+    "mix_random",           # 50/50 iPhone/Android
+    "iphone_random",        # random parmi tous les iPhone 16/17
+    "android_random",       # random parmi tous les Android
+    "samsung_random",       # random parmi Samsung uniquement
+    "pixel_random",         # random parmi Pixel uniquement
+    # iPhone spécifiques
+    "iphone_17_pro_max", "iphone_17_pro", "iphone_17_air", "iphone_17",
+    "iphone_16_pro_max", "iphone_16_pro", "iphone_16_plus", "iphone_16", "iphone_16e",
+    # Samsung spécifiques
+    "samsung_s25_ultra", "samsung_s25_plus", "samsung_s25",
+    "samsung_s24_ultra", "samsung_s24_plus", "samsung_s24",
+    "samsung_s23_ultra", "samsung_s23_plus", "samsung_s23",
+    # Pixel spécifiques
+    "pixel_9_pro_xl", "pixel_9_pro", "pixel_9",
+    "pixel_8_pro", "pixel_8",
+    # Xiaomi
+    "xiaomi_15_ultra", "xiaomi_15_pro", "xiaomi_15",
+}
+
+# Mapping des clés → tuples correspondants dans les catalogues
+_IPHONE_MAP = {
+    "iphone_17_pro_max": "iPhone 17 Pro Max",
+    "iphone_17_pro":     "iPhone 17 Pro",
+    "iphone_17_air":     "iPhone 17 Air",
+    "iphone_17":         "iPhone 17",
+    "iphone_16_pro_max": "iPhone 16 Pro Max",
+    "iphone_16_pro":     "iPhone 16 Pro",
+    "iphone_16_plus":    "iPhone 16 Plus",
+    "iphone_16":         "iPhone 16",
+    "iphone_16e":        "iPhone 16e",
+}
+
+_ANDROID_MAP = {
+    "samsung_s25_ultra": "SM-S938B",
+    "samsung_s25_plus":  "SM-S936B",
+    "samsung_s25":       "SM-S931B",
+    "samsung_s24_ultra": "SM-S928B",
+    "samsung_s24_plus":  "SM-S926B",
+    "samsung_s24":       "SM-S921B",
+    "samsung_s23_ultra": "SM-S918B",
+    "samsung_s23_plus":  "SM-S916B",
+    "samsung_s23":       "SM-S911B",
+    "pixel_9_pro_xl":    "Pixel 9 Pro XL",
+    "pixel_9_pro":       "Pixel 9 Pro",
+    "pixel_9":           "Pixel 9",
+    "pixel_8_pro":       "Pixel 8 Pro",
+    "pixel_8":           "Pixel 8",
+    "xiaomi_15_ultra":   "24129PN74G",
+    "xiaomi_15_pro":     "2410FPN6DG",
+    "xiaomi_15":         "2410FPN6DC",
+}
+
+
+def _iphone_metadata_fixed(model: str) -> Dict[str, str]:
+    """Génère metadata iPhone pour un modèle spécifique (trouve les iOS versions)."""
+    for m, ios_versions in IPHONE_MODELS:
+        if m == model:
+            return _iphone_metadata_impl(m, ios_versions)
+    return _iphone_metadata()  # fallback si modèle pas trouvé
+
+
+def _android_metadata_fixed(model_code: str) -> Dict[str, str]:
+    """Génère metadata Android pour un modèle spécifique."""
+    for make, mc, name, versions in ANDROID_MODELS:
+        if mc == model_code:
+            return _android_metadata_impl(make, mc, name, versions)
+    return _android_metadata()  # fallback
+
+
+def _iphone_metadata_impl(model: str, ios_versions: list) -> Dict[str, str]:
+    """Version factorisée du generator iPhone."""
+    ios_version = random.choice(ios_versions)
+    base_lat, base_lng = random.choice(CITY_COORDS)
+    lat = base_lat + random.uniform(-0.05, 0.05)
+    lng = base_lng + random.uniform(-0.05, 0.05)
+    alt = random.uniform(0, 200)
+    location_str = _format_iso6709(lat, lng, alt)
+    base_date = _random_datetime()
+    timings = _random_timings(base_date)
+    content_uuid = _apple_uuid()
+    lavf = random.choice(LAVF_VERSIONS)
+    lavc = random.choice(LAVC_VERSIONS)
+    return {
+        "comment": "", "description": "", "title": "", "artist": "", "album": "",
+        "make": "Apple",
+        "model": model,
+        "com.apple.quicktime.make": "Apple",
+        "com.apple.quicktime.model": model,
+        "com.apple.quicktime.software": ios_version,
+        "location": location_str,
+        "location-eng": location_str,
+        "com.apple.quicktime.location.ISO6709": location_str,
+        "com.apple.quicktime.location.accuracy.horizontal": f"{random.uniform(4.5, 15.0):.6f}",
+        "creation_time": timings["format_time"],
+        "date": timings["format_time"][:10],
+        "com.apple.quicktime.creationdate": timings["apple_creationdate"],
+        "com.apple.quicktime.content.identifier": content_uuid,
+        "encoder": f"Lavf{lavf}",
+        "_platform": "iphone",
+        "_video_creation_time": timings["v_stream_time"],
+        "_audio_creation_time": timings["a_stream_time"],
+        "_stream_encoder_lavc": f"Lavc{lavc} libx264",
+        "_video_handler_name": "Core Media Video",
+        "_audio_handler_name": "Core Media Audio",
+    }
+
+
+def _android_metadata_impl(make: str, model_code: str, _name: str, android_versions: list) -> Dict[str, str]:
+    """Version factorisée du generator Android."""
+    android_version = random.choice(android_versions)
+    base_lat, base_lng = random.choice(CITY_COORDS)
+    lat = base_lat + random.uniform(-0.05, 0.05)
+    lng = base_lng + random.uniform(-0.05, 0.05)
+    location_str = _format_iso6709_short(lat, lng)
+    base_date = _random_datetime()
+    timings = _random_timings(base_date)
+    lavf = random.choice(LAVF_VERSIONS)
+    lavc = random.choice(LAVC_VERSIONS)
+    capture_fps = random.choice([30.0, 60.0])
+    return {
+        "comment": "", "description": "", "title": "", "artist": "", "album": "",
+        "make": make,
+        "model": model_code,
+        "com.android.version": android_version,
+        "com.android.capture.fps": f"{capture_fps:.6f}",
+        "com.android.manufacturer": make,
+        "com.android.model": model_code,
+        "location": location_str,
+        "location-eng": location_str,
+        "creation_time": timings["format_time"],
+        "date": timings["format_time"][:10],
+        "encoder": f"Lavf{lavf}",
+        "_platform": "android",
+        "_video_creation_time": timings["v_stream_time"],
+        "_audio_creation_time": timings["a_stream_time"],
+        "_stream_encoder_lavc": f"Lavc{lavc} libx264",
+        "_video_handler_name": "VideoHandle",
+        "_audio_handler_name": "SoundHandle",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fonction principale : supporte un choix de device
+# ---------------------------------------------------------------------------
+def random_metadata(device_choice: str = "mix_random") -> Dict[str, str]:
+    """
+    Retourne un dict de métadonnées COMPLET et UNIQUE.
+    
+    Args:
+        device_choice: Le type de device à simuler.
+            - "mix_random": 50/50 iPhone/Android (défaut)
+            - "iphone_random": random parmi iPhone 16/17
+            - "android_random": random parmi tous Android
+            - "samsung_random", "pixel_random": random dans la marque
+            - "iphone_17_pro_max", "samsung_s24_ultra", etc: modèle spécifique
+    """
+    # Mix 50/50 (par défaut)
+    if device_choice == "mix_random" or device_choice not in DEVICE_CHOICES:
+        if random.random() < 0.5:
+            return _iphone_metadata()
+        return _android_metadata()
+
+    # iPhone aléatoire
+    if device_choice == "iphone_random":
+        return _iphone_metadata()
+
+    # Android aléatoire (toutes marques)
+    if device_choice == "android_random":
+        return _android_metadata()
+
+    # Samsung aléatoire
+    if device_choice == "samsung_random":
+        samsung_models = [m for m in ANDROID_MODELS if m[0] == "samsung"]
+        make, code, name, versions = random.choice(samsung_models)
+        return _android_metadata_impl(make, code, name, versions)
+
+    # Pixel aléatoire
+    if device_choice == "pixel_random":
+        pixel_models = [m for m in ANDROID_MODELS if m[0] == "Google"]
+        make, code, name, versions = random.choice(pixel_models)
+        return _android_metadata_impl(make, code, name, versions)
+
+    # iPhone spécifique
+    if device_choice in _IPHONE_MAP:
+        return _iphone_metadata_fixed(_IPHONE_MAP[device_choice])
+
+    # Android spécifique
+    if device_choice in _ANDROID_MAP:
+        return _android_metadata_fixed(_ANDROID_MAP[device_choice])
+
+    # Fallback
+    return _iphone_metadata() if random.random() < 0.5 else _android_metadata()
 
 
 def metadata_to_ffmpeg_args(metadata: Dict[str, str]) -> list:
@@ -229,11 +502,10 @@ def metadata_to_ffmpeg_args(metadata: Dict[str, str]) -> list:
     args = []
     for key, value in metadata.items():
         if key.startswith("_"):
-            continue  # clés privées consommées ailleurs
-        # -metadata s'applique au format (container MP4)
+            continue
         args += ["-metadata", f"{key}={value}"]
 
-    # Stream vidéo : creation_time décalé + handler_name + encoder
+    # Stream vidéo
     v_time = metadata.get("_video_creation_time")
     v_handler = metadata.get("_video_handler_name")
     v_encoder = metadata.get("_stream_encoder_lavc")
@@ -244,7 +516,7 @@ def metadata_to_ffmpeg_args(metadata: Dict[str, str]) -> list:
     if v_encoder:
         args += ["-metadata:s:v:0", f"encoder={v_encoder}"]
 
-    # Stream audio : creation_time décalé (encore un peu) + handler_name
+    # Stream audio
     a_time = metadata.get("_audio_creation_time")
     a_handler = metadata.get("_audio_handler_name")
     if a_time:
