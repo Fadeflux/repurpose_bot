@@ -1,9 +1,13 @@
 """
 Service de traitement vidéo via FFmpeg.
 
-Construit une chaîne de filtres unique (single pass) pour maximiser
-les performances tout en appliquant toutes les transformations demandées.
-Les filtres dont la valeur est None sont SKIPPÉS.
+Améliorations v2.1 :
+- Framerate forcé à 60 fps (qualité max TikTok, pas de valeurs suspectes)
+- Bitrate plus élevé (8000-12000 kbps) pour matcher la qualité des sources TikTok
+- Stripping systématique des métadonnées suspectes (comment vid:xxx TikTok)
+- Injection de métadonnées aléatoires crédibles (géoloc, device, date)
+- Aspect ratio forcé à 1:1 (plus de ratio bizarre 680:681)
+- Preset "medium" pour meilleure qualité d'encodage
 """
 import asyncio
 import json
@@ -14,13 +18,14 @@ from typing import Dict, List, Optional, Tuple
 
 from app.config import OUTPUT_DIR, settings
 from app.utils.logger import get_logger
+from app.utils.metadata_randomizer import metadata_to_ffmpeg_args, random_metadata
 from app.utils.randomizer import random_params
 
 logger = get_logger("ffmpeg_service")
 
 
 # ---------------------------------------------------------------------------
-# Sondage du fichier source (ffprobe) pour connaître la durée
+# Sondage du fichier source (ffprobe)
 # ---------------------------------------------------------------------------
 async def probe_duration(path: Path) -> Optional[float]:
     """Retourne la durée du média en secondes via ffprobe, ou None si échec."""
@@ -45,7 +50,7 @@ async def probe_duration(path: Path) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
-# Construction de la chaîne de filtres (skip les None)
+# Construction de la chaîne de filtres
 # ---------------------------------------------------------------------------
 def build_filter_complex(params: Dict[str, Optional[float]]) -> str:
     """
@@ -55,29 +60,39 @@ def build_filter_complex(params: Dict[str, Optional[float]]) -> str:
     W, H = settings.TARGET_WIDTH, settings.TARGET_HEIGHT
     filters: List[str] = []
 
-    # fps (toujours appliqué : par défaut 30 si désactivé)
-    fps = params.get("framerate") or 30
-    filters.append(f"fps={fps}")
+    # Framerate forcé à 60 fps (qualité max, pas de valeur suspecte)
+    filters.append(f"fps={settings.TARGET_FPS}")
 
-    # scale + crop (toujours appliqués pour garantir le canvas 1080x1920)
+    # Scale + crop pour garantir le canvas 1080x1920
     filters.append(f"scale={W}:{H}:force_original_aspect_ratio=increase")
     filters.append(f"crop={W}:{H}")
+
+    # Force le sample aspect ratio à 1:1 (évite le 680:681 bizarre)
+    filters.append("setsar=1:1")
 
     # Zoom (optionnel)
     zoom = params.get("zoom")
     if zoom is not None and zoom > 1.0:
         crop_w = int(W / zoom)
         crop_h = int(H / zoom)
+        # Assure que les dimensions restent paires (requis par libx264)
+        crop_w -= crop_w % 2
+        crop_h -= crop_h % 2
         filters.append(f"crop={crop_w}:{crop_h}")
         filters.append(f"scale={W}:{H}:flags=lanczos")
+        filters.append("setsar=1:1")
 
-    # Rotation (optionnelle)
+    # Rotation (optionnelle) — appliquée AVANT le crop final pour ne pas casser l'aspect
     rotation = params.get("rotation")
     if rotation is not None and abs(rotation) > 0.001:
         rot_rad = rotation * 3.141592653589793 / 180.0
-        filters.append(f"rotate={rot_rad}:ow={W}:oh={H}:c=black@0")
+        # On rogne ce qui dépasse au lieu de remplir de noir (plus propre)
+        filters.append(f"rotate={rot_rad}:ow=rotw({rot_rad}):oh=roth({rot_rad})")
+        # Re-crop au format attendu
+        filters.append(f"crop={W}:{H}")
+        filters.append("setsar=1:1")
 
-    # Correction colorimétrique (eq) : on applique seulement les composantes fournies
+    # Correction colorimétrique (eq)
     eq_parts = []
     if params.get("brightness") is not None:
         eq_parts.append(f"brightness={params['brightness']}")
@@ -100,7 +115,7 @@ def build_filter_complex(params: Dict[str, Optional[float]]) -> str:
     if vignette is not None and vignette > 0:
         filters.append(f"vignette=angle={vignette}")
 
-    # Speed (optionnelle) -> setpts
+    # Speed (optionnelle)
     speed = params.get("speed")
     if speed is not None and abs(speed - 1.0) > 0.001:
         pts_factor = round(1.0 / speed, 6)
@@ -127,14 +142,11 @@ async def process_one(
     job_id: str,
     copy_index: int,
 ) -> Dict:
-    """
-    Génère une copie avec les paramètres donnés.
-    Retourne un dict décrivant le résultat (succès ou erreur).
-    """
+    """Génère une copie avec les paramètres donnés."""
     out_name = f"{job_id}_copy{copy_index:02d}_{uuid.uuid4().hex[:8]}.mp4"
     out_path = OUTPUT_DIR / out_name
 
-    # Cuts : peuvent être None (pas de coupe)
+    # Cuts (peuvent être None)
     cut_start = params.get("cut_start") or 0.0
     cut_end = params.get("cut_end") or 0.0
 
@@ -148,31 +160,51 @@ async def process_one(
     vf = build_filter_complex(params)
     af = build_audio_filter(params)
 
-    # Bitrate : par défaut 5500 si désactivé
-    bitrate = int(params.get("bitrate") or 5500)
+    # Bitrate : par défaut 10000 si désactivé (qualité élevée)
+    bitrate = int(params.get("bitrate") or 10000)
+
+    # Métadonnées aléatoires + stripping des métadonnées source
+    meta = random_metadata()
+    meta_args = metadata_to_ffmpeg_args(meta)
 
     cmd: List[str] = [
         "ffmpeg", "-y",
         "-hide_banner", "-loglevel", "error",
         *input_args,
         "-i", str(source),
+        # -map_metadata -1 : supprime TOUTES les métadonnées de la source
+        # (y compris le fameux comment: vid:v24044gl... de TikTok)
+        "-map_metadata", "-1",
         "-vf", vf,
     ]
     if af:
         cmd += ["-af", af]
 
     cmd += [
+        # Encodage vidéo
         "-c:v", settings.VIDEO_ENCODER,
         "-preset", settings.PRESET,
+        "-profile:v", settings.VIDEO_PROFILE,
+        "-level:v", "4.2",
         "-b:v", f"{bitrate}k",
-        "-maxrate", f"{int(bitrate * 1.2)}k",
+        "-maxrate", f"{int(bitrate * 1.3)}k",
         "-bufsize", f"{int(bitrate * 2)}k",
         "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-colorspace", "bt709",
+        # Force framerate de sortie (en plus du filtre fps)
+        "-r", str(settings.TARGET_FPS),
+        # Audio
         "-c:a", settings.AUDIO_CODEC,
         "-b:a", settings.AUDIO_BITRATE,
         "-ar", "44100",
+        "-ac", "2",
+        # Conteneur
+        "-movflags", "+faststart",
         "-shortest",
+        # Métadonnées aléatoires (appliquées APRÈS -map_metadata -1)
+        *meta_args,
         str(out_path),
     ]
 
@@ -193,6 +225,7 @@ async def process_one(
             "success": False,
             "error": err,
             "params": params,
+            "metadata": meta,
         }
 
     return {
@@ -202,11 +235,12 @@ async def process_one(
         "path": str(out_path),
         "size_bytes": out_path.stat().st_size,
         "params": params,
+        "metadata": meta,
     }
 
 
 # ---------------------------------------------------------------------------
-# Orchestration : N copies en parallèle contrôlé
+# Orchestration
 # ---------------------------------------------------------------------------
 async def process_video(
     source: Path,
@@ -216,11 +250,7 @@ async def process_video(
     custom_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
     enabled_filters: Optional[List[str]] = None,
 ) -> List[Dict]:
-    """
-    Génère `copies` variantes randomisées de la vidéo source.
-    - custom_ranges : surcharge des bornes par paramètre
-    - enabled_filters : liste des filtres actifs (None = tous actifs)
-    """
+    """Génère `copies` variantes randomisées de la vidéo source."""
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg introuvable dans le PATH.")
 
