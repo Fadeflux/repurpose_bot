@@ -79,6 +79,41 @@ def is_drive_enabled() -> bool:
 # ---------------------------------------------------------------------------
 # Opérations Drive
 # ---------------------------------------------------------------------------
+def _get_user_owner_email() -> Optional[str]:
+    """
+    Email du propriétaire humain (toi) qui possède le quota storage.
+    Défini via la variable DRIVE_OWNER_EMAIL (ex: andreptpt30@gmail.com).
+    """
+    return os.getenv("DRIVE_OWNER_EMAIL")
+
+
+def _ensure_user_has_access(file_id: str) -> bool:
+    """
+    Donne au user owner (toi) un accès Editor au fichier/dossier créé.
+    Ça garantit que le fichier est visible dans TON Drive perso,
+    et que le quota storage utilisé est le TIEN (pas celui du service account).
+    """
+    client = get_drive_client()
+    user_email = _get_user_owner_email()
+    if not client or not user_email:
+        return False
+    try:
+        client.permissions().create(
+            fileId=file_id,
+            body={
+                "type": "user",
+                "role": "writer",
+                "emailAddress": user_email,
+            },
+            sendNotificationEmail=False,
+            supportsAllDrives=True,
+        ).execute()
+        return True
+    except Exception as e:
+        logger.warning(f"Permission share échouée pour {file_id} → {user_email}: {e}")
+        return False
+
+
 def create_batch_folder(batch_name: str) -> Optional[str]:
     """
     Crée un sous-dossier dans le dossier parent Drive.
@@ -100,8 +135,11 @@ def create_batch_folder(batch_name: str) -> Optional[str]:
             fields="id, webViewLink",
             supportsAllDrives=True,
         ).execute()
-        logger.info(f"Dossier Drive créé : {batch_name} -> {folder['id']}")
-        return folder["id"]
+        folder_id = folder["id"]
+        # Partage avec l'utilisateur propriétaire pour qu'il voit le dossier
+        _ensure_user_has_access(folder_id)
+        logger.info(f"Dossier Drive créé : {batch_name} -> {folder_id}")
+        return folder_id
     except Exception as e:
         logger.error(f"Erreur création dossier Drive : {e}")
         return None
@@ -141,10 +179,12 @@ def upload_file(
             fields="id, name, webViewLink",
             supportsAllDrives=True,
         ).execute()
+        # Partage le fichier avec le user owner pour qu'il soit visible dans son Drive
+        # (et que son quota storage soit utilisé)
+        _ensure_user_has_access(result["id"])
         logger.info(f"upload_file: OK {local_path.name} → {result.get('id')}")
         return result
     except Exception as e:
-        # Log complet avec traceback pour diagnostic
         logger.exception(f"upload_file: ÉCHEC {local_path.name} : {type(e).__name__}: {e}")
         return None
 
