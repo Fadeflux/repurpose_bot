@@ -90,11 +90,15 @@ SUPPORTED_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif")
 async def _handle_spoof_message(message: "discord.Message"):
     """
     Un VA a posté un message dans un canal spoof-photos.
-    Télécharge chaque photo, applique le spoof, renvoie spoofée, supprime l'originale.
-    Photos spoofées auto-supprimées après 2 minutes.
+    Télécharge chaque photo, applique le spoof, upload sur Drive (qui préserve les EXIF),
+    envoie le lien Drive dans le canal (Discord supprimerait les EXIF si on uploadait direct).
+    Tout (message Discord + fichier Drive) est auto-supprimé après 2 minutes.
     """
     import aiohttp
     from app.services.photo_spoof import spoof_image
+    from app.services.drive_service import (
+        upload_bytes, delete_file, get_or_create_subfolder, is_drive_enabled,
+    )
 
     # Filtre les attachments image
     image_atts = [
@@ -103,7 +107,6 @@ async def _handle_spoof_message(message: "discord.Message"):
     ]
 
     if not image_atts:
-        # Pas d'image : ignore + supprime discrètement
         try:
             await message.delete()
         except Exception:
@@ -117,30 +120,83 @@ async def _handle_spoof_message(message: "discord.Message"):
             pass
         return
 
-    spoofed_files = []
+    # Drive doit être activé
+    if not is_drive_enabled():
+        logger.error("Drive non activé, impossible de spoof")
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        try:
+            await message.author.send("⚠️ Service temporairement indisponible. Contacte l'admin.")
+        except Exception:
+            pass
+        return
+
+    # Récupère (ou crée) le sous-dossier "spoof-photos-temp" dans le Drive parent
+    parent_id = os.getenv("GOOGLE_DRIVE_PARENT_ID")
+    if not parent_id:
+        logger.error("GOOGLE_DRIVE_PARENT_ID non défini")
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        return
+
+    loop = asyncio.get_event_loop()
+    spoof_folder_id = await loop.run_in_executor(
+        None, get_or_create_subfolder, parent_id, "spoof-photos-temp"
+    )
+    if not spoof_folder_id:
+        logger.error("Impossible de créer le sous-dossier spoof-photos-temp")
+        return
+
+    # Télécharge, spoof, upload chaque photo
+    uploaded_results = []  # liste de {drive_id, download_url, device, filename}
     try:
         async with aiohttp.ClientSession() as session:
             for att in image_atts:
                 try:
                     async with session.get(att.url, timeout=30) as r:
                         if r.status != 200:
-                            logger.warning(f"Impossible de dl {att.filename}: status {r.status}")
+                            logger.warning(f"Impossible de dl {att.filename}: {r.status}")
                             continue
                         raw_bytes = await r.read()
 
-                    # Spoof (sync, mais rapide pour une image)
+                    # Spoof
                     spoofed_bytes, info = spoof_image(raw_bytes, att.filename)
 
-                    # Nouveau nom : on change l'extension en .jpg si besoin
+                    # Nom unique
                     base_name = att.filename.rsplit(".", 1)[0]
-                    # Ajoute un suffixe aléatoire pour que ça soit pas évident
                     new_name = f"{base_name}_IMG_{random.randint(1000, 9999)}.jpg"
 
-                    discord_file = discord.File(
-                        fp=io.BytesIO(spoofed_bytes),
-                        filename=new_name,
+                    # Upload sur Drive (public link)
+                    upload_result = await loop.run_in_executor(
+                        None,
+                        upload_bytes,
+                        spoofed_bytes,
+                        new_name,
+                        spoof_folder_id,
+                        "image/jpeg",
+                        True,  # make_public
                     )
-                    spoofed_files.append((discord_file, info))
+                    if not upload_result:
+                        logger.warning(f"Upload Drive échoué pour {new_name}")
+                        continue
+
+                    # Construit le lien de download direct
+                    file_id = upload_result.get("id")
+                    # Lien de download direct (force le DL plutôt que l'aperçu)
+                    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+                    view_url = upload_result.get("webViewLink", "")
+
+                    uploaded_results.append({
+                        "drive_id": file_id,
+                        "download_url": download_url,
+                        "view_url": view_url,
+                        "device": info["device_model"],
+                        "filename": new_name,
+                    })
                 except Exception as e:
                     logger.warning(f"Erreur spoof {att.filename}: {e}")
     except Exception as e:
@@ -152,34 +208,47 @@ async def _handle_spoof_message(message: "discord.Message"):
     except Exception as e:
         logger.warning(f"Erreur suppression original: {e}")
 
-    if not spoofed_files:
+    if not uploaded_results:
         try:
             await message.author.send("⚠️ Impossible de traiter ta photo. Réessaie.")
         except Exception:
             pass
         return
 
-    # Envoie les photos spoofées dans le canal
-    files_to_send = [f for f, _ in spoofed_files]
-    info_lines = [f"`{info['device_model']}`" for _, info in spoofed_files]
-    content = (
-        f"📸 {message.author.mention} — Photo(s) spoofée(s) : {', '.join(info_lines)}\n"
-        f"*Auto-supprimée dans 2 minutes*"
-    )
+    # Construit le message de réponse avec les liens Drive
+    lines = [f"📸 {message.author.mention} — Photo(s) spoofée(s) :"]
+    for idx, res in enumerate(uploaded_results, start=1):
+        lines.append(
+            f"  `{idx}.` **{res['device']}** → "
+            f"[📥 Télécharger]({res['download_url']}) · "
+            f"[👁️ Voir]({res['view_url']})"
+        )
+    lines.append("*⏱️ Auto-supprimée dans 2 minutes*")
+    content = "\n".join(lines)
 
     try:
-        sent_msg = await message.channel.send(content=content, files=files_to_send)
+        sent_msg = await message.channel.send(content=content)
     except Exception as e:
-        logger.exception(f"Erreur envoi photo spoofée: {e}")
+        logger.exception(f"Erreur envoi réponse: {e}")
+        # Si le message échoue, supprime quand même les fichiers Drive
+        for res in uploaded_results:
+            await loop.run_in_executor(None, delete_file, res["drive_id"])
         return
 
-    # Planifie la suppression dans 2 minutes
+    # Planifie la suppression dans 2 minutes (message + fichiers Drive)
     async def _delete_later():
         await asyncio.sleep(SPOOF_DELETE_AFTER_SECONDS)
+        # Supprime le message Discord
         try:
             await sent_msg.delete()
         except Exception:
             pass
+        # Supprime les fichiers Drive
+        for res in uploaded_results:
+            try:
+                await loop.run_in_executor(None, delete_file, res["drive_id"])
+            except Exception:
+                pass
 
     asyncio.create_task(_delete_later())
 
