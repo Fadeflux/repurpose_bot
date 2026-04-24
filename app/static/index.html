@@ -309,8 +309,13 @@
       <button class="btn" onclick="document.getElementById('fileInput').click()">Browse</button>
     </div>
     <div class="upload-row">
+      <label>Équipe :</label>
+      <select id="teamSelect" onchange="onTeamChange()" style="background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer;">
+        <option value="geelark">Geelark</option>
+        <option value="instagram">Instagram</option>
+      </select>
       <label>VA :</label>
-      <select id="vaName" style="background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer; max-width: 220px;">
+      <select id="vaName" style="background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer; max-width: 280px;">
         <option value="">-- Sélectionner VA --</option>
       </select>
       <button class="btn" onclick="resyncVAs()" title="Resync depuis Discord" style="padding: 6px 10px; font-size: 11px;">🔄</button>
@@ -596,6 +601,7 @@ async function generate() {
   files.forEach(f => formData.append("files", f));
   formData.append("batch_name", batchName);
   formData.append("va_name", vaName);
+  formData.append("team", getCurrentTeam());
   formData.append("copies_per_video", copies);
   formData.append("concurrency", parseInt(document.getElementById("concurrency").value, 10) || 4);
   formData.append("upload_to_drive", uploadDrive ? "true" : "false");
@@ -740,16 +746,28 @@ loadVAs();
 // =========================================================================
 // Chargement de la liste VA depuis Discord (via /api/vas)
 // =========================================================================
+function getCurrentTeam() {
+  const teamSelect = document.getElementById("teamSelect");
+  return teamSelect ? teamSelect.value : "geelark";
+}
+
+async function onTeamChange() {
+  const team = getCurrentTeam();
+  localStorage.setItem("repurpose_team", team);
+  await loadVAs();
+}
+
 async function loadVAs() {
   const select = document.getElementById("vaName");
   const adminList = document.getElementById("vaAdminList");
   try {
-    const r = await fetch("/api/vas");
+    const team = getCurrentTeam();
+    const r = await fetch(`/api/vas?team=${encodeURIComponent(team)}`);
     const data = await r.json();
     const vas = data.vas || [];
-    const savedVa = localStorage.getItem("repurpose_va_name") || "";
+    const savedVa = localStorage.getItem(`repurpose_va_name_${team}`) || "";
 
-    // Dropdown VA
+    // Dropdown VA (filtré par équipe)
     if (select) {
       select.innerHTML = '<option value="">-- Sélectionner VA --</option>';
       vas.forEach(v => {
@@ -758,7 +776,6 @@ async function loadVAs() {
         const email = typeof v === "object" ? v.email : null;
         const opt = document.createElement("option");
         opt.value = name;
-        // Affiche "Nom — email@gmail.com" ou "Nom ⚠️ (pas d'email)"
         opt.textContent = email ? `${name} — ${email}` : `${name} ⚠️ (pas d'email)`;
         if (name === savedVa) opt.selected = true;
         select.appendChild(opt);
@@ -767,37 +784,55 @@ async function loadVAs() {
         const d = new Date(data.last_sync);
         select.title = `Dernière sync Discord : ${d.toLocaleString("fr-FR")}`;
       }
-      select.addEventListener("change", () => {
-        localStorage.setItem("repurpose_va_name", select.value);
-      });
+      if (!select._changeListenerAdded) {
+        select.addEventListener("change", () => {
+          const currentTeam = getCurrentTeam();
+          localStorage.setItem(`repurpose_va_name_${currentTeam}`, select.value);
+        });
+        select._changeListenerAdded = true;
+      }
     }
 
-    // Panneau admin : un champ email par VA
+    // Panneau admin : TOUTES les équipes (pas filtré)
     if (adminList) {
+      // Fetch tous les VA sans filtre
+      const rAll = await fetch("/api/vas");
+      const dataAll = await rAll.json();
+      const vasAll = dataAll.vas || [];
       adminList.innerHTML = "";
-      if (vas.length === 0) {
+      if (vasAll.length === 0) {
         adminList.innerHTML = '<p style="color: var(--muted); font-size: 13px;">Aucun VA dans le cache. Clique 🔄 pour sync.</p>';
-        return;
+      } else {
+        vasAll.forEach(v => {
+          if (typeof v === "string") return;
+          const teamBadge = v.team ? ` <span style="font-size: 10px; padding: 2px 6px; background: var(--accent-soft); color: var(--accent); border-radius: 4px;">${v.team}</span>` : "";
+          const row = document.createElement("div");
+          row.style.cssText = "display: flex; gap: 8px; align-items: center; padding: 8px; background: var(--panel-2); border-radius: 6px;";
+          row.innerHTML = `
+            <span style="min-width: 160px; font-weight: 600; font-size: 13px;">${v.name}${teamBadge}</span>
+            <input type="email" placeholder="email@gmail.com" value="${v.email || ''}"
+                   data-discord-id="${v.discord_id}"
+                   style="flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-size: 13px;" />
+            <button class="btn" onclick="saveVAEmail(this)" style="padding: 6px 12px; font-size: 12px;">💾 Save</button>
+            <span class="save-status" style="font-size: 11px; color: var(--muted); min-width: 60px;"></span>
+          `;
+          adminList.appendChild(row);
+        });
       }
-      vas.forEach(v => {
-        if (typeof v === "string") return; // ancien format
-        const row = document.createElement("div");
-        row.style.cssText = "display: flex; gap: 8px; align-items: center; padding: 8px; background: var(--panel-2); border-radius: 6px;";
-        row.innerHTML = `
-          <span style="min-width: 120px; font-weight: 600; font-size: 13px;">${v.name}</span>
-          <input type="email" placeholder="email@gmail.com" value="${v.email || ''}"
-                 data-discord-id="${v.discord_id}"
-                 style="flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-size: 13px;" />
-          <button class="btn" onclick="saveVAEmail(this)" style="padding: 6px 12px; font-size: 12px;">💾 Save</button>
-          <span class="save-status" style="font-size: 11px; color: var(--muted); min-width: 60px;"></span>
-        `;
-        adminList.appendChild(row);
-      });
     }
   } catch (e) {
     console.warn("Impossible de charger la liste VA:", e);
   }
 }
+
+// Restore team choice au boot
+(function restoreTeam() {
+  const savedTeam = localStorage.getItem("repurpose_team");
+  if (savedTeam) {
+    const teamSelect = document.getElementById("teamSelect");
+    if (teamSelect) teamSelect.value = savedTeam;
+  }
+})();
 
 async function saveVAEmail(btn) {
   const row = btn.closest("div");
