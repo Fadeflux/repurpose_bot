@@ -278,3 +278,126 @@ def share_folder_with_users(
             failed.append({"email": email, "error": str(e)[:200]})
     logger.info(f"Dossier {folder_id} partagé : OK={len(success)}, KO={len(failed)}")
     return {"success": success, "failed": failed}
+
+
+def upload_bytes(
+    data: bytes,
+    filename: str,
+    folder_id: str,
+    mime_type: str = "image/jpeg",
+    make_public: bool = True,
+) -> Optional[Dict]:
+    """
+    Upload des bytes directement vers Drive (pas besoin de fichier local).
+    Si make_public=True, génère un lien de download public (anyone with link).
+    Retourne {id, name, webViewLink, webContentLink} ou None.
+    """
+    import io
+    client = get_drive_client()
+    if not client:
+        logger.error(f"upload_bytes: client Drive non initialisé pour {filename}")
+        return None
+    try:
+        _, _, _, _, _, MediaIoBaseUpload = _load_google_libs()
+        metadata = {
+            "name": filename,
+            "parents": [folder_id],
+        }
+        media = MediaIoBaseUpload(
+            io.BytesIO(data),
+            mimetype=mime_type,
+            resumable=False,
+        )
+        result = client.files().create(
+            body=metadata,
+            media_body=media,
+            fields="id, name, webViewLink, webContentLink",
+            supportsAllDrives=True,
+        ).execute()
+        file_id = result.get("id")
+        logger.info(f"upload_bytes: OK {filename} → {file_id}")
+
+        # Rend le fichier accessible via "anyone with link"
+        if make_public and file_id:
+            try:
+                client.permissions().create(
+                    fileId=file_id,
+                    body={"role": "reader", "type": "anyone"},
+                    supportsAllDrives=True,
+                ).execute()
+                # Récupère le webContentLink (download direct) après permission set
+                refreshed = client.files().get(
+                    fileId=file_id,
+                    fields="id, name, webViewLink, webContentLink",
+                    supportsAllDrives=True,
+                ).execute()
+                result.update(refreshed)
+                logger.info(f"upload_bytes: fichier {file_id} rendu public")
+            except Exception as e:
+                logger.warning(f"upload_bytes: impossible de rendre public {file_id}: {e}")
+
+        return result
+    except Exception as e:
+        logger.exception(f"upload_bytes: ÉCHEC {filename}: {type(e).__name__}: {e}")
+        return None
+
+
+def delete_file(file_id: str) -> bool:
+    """Supprime définitivement un fichier Drive par son ID."""
+    client = get_drive_client()
+    if not client:
+        return False
+    try:
+        client.files().delete(fileId=file_id, supportsAllDrives=True).execute()
+        logger.info(f"delete_file: {file_id} supprimé")
+        return True
+    except Exception as e:
+        logger.warning(f"delete_file: ÉCHEC {file_id}: {e}")
+        return False
+
+
+def get_or_create_subfolder(parent_id: str, subfolder_name: str) -> Optional[str]:
+    """
+    Retourne l'ID du sous-dossier s'il existe, sinon le crée.
+    Utile pour avoir un dossier 'spoof-photos-temp' persistant.
+    """
+    client = get_drive_client()
+    if not client:
+        return None
+    try:
+        # Cherche si le sous-dossier existe déjà
+        query = (
+            f"'{parent_id}' in parents and "
+            f"name = '{subfolder_name}' and "
+            f"mimeType = 'application/vnd.google-apps.folder' and "
+            f"trashed = false"
+        )
+        res = client.files().list(
+            q=query,
+            fields="files(id, name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        ).execute()
+        existing = res.get("files", [])
+        if existing:
+            logger.info(f"Sous-dossier '{subfolder_name}' déjà existant: {existing[0]['id']}")
+            return existing[0]["id"]
+
+        # Sinon, crée le sous-dossier
+        metadata = {
+            "name": subfolder_name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [parent_id],
+        }
+        created = client.files().create(
+            body=metadata,
+            fields="id",
+            supportsAllDrives=True,
+        ).execute()
+        sub_id = created.get("id")
+        logger.info(f"Sous-dossier '{subfolder_name}' créé: {sub_id}")
+        return sub_id
+    except Exception as e:
+        logger.exception(f"get_or_create_subfolder: ÉCHEC {subfolder_name}: {e}")
+        return None
+
