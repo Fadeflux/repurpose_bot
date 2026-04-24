@@ -310,9 +310,26 @@
     </div>
     <div class="upload-row">
       <label>VA :</label>
-      <input type="text" id="vaName" placeholder="Ton prénom (ex: Sarah)" style="max-width: 200px;" />
-      <label>Batch Name :</label>
-      <input type="text" id="batchName" placeholder="Ex: 22avril_mix" />
+      <select id="vaName" style="background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer; max-width: 220px;">
+        <option value="">-- Sélectionner VA --</option>
+      </select>
+      <button class="btn" onclick="resyncVAs()" title="Resync depuis Discord" style="padding: 6px 10px; font-size: 11px;">🔄</button>
+      <label>Modele :</label>
+      <select id="batchName" style="background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer;">
+        <option value="">-- Choisir un modele --</option>
+        <option value="Modele 1">Modele 1</option>
+        <option value="Modele 2">Modele 2</option>
+        <option value="Modele 3">Modele 3</option>
+        <option value="Modele 4">Modele 4</option>
+        <option value="Modele 5">Modele 5</option>
+        <option value="Modele 6">Modele 6</option>
+        <option value="Modele 7">Modele 7</option>
+        <option value="Modele 8">Modele 8</option>
+        <option value="Modele 9">Modele 9</option>
+        <option value="Modele 10">Modele 10</option>
+        <option value="Modele 11">Modele 11</option>
+        <option value="Modele 12">Modele 12</option>
+      </select>
       <div class="inline-toggle">
         <input type="checkbox" id="uploadDrive" checked />
         <label for="uploadDrive">Upload Drive</label>
@@ -704,17 +721,68 @@ function renderResults(data) {
 buildParamsGrid();
 checkDriveStatus();
 updatePreview();
+loadVAs();
 
-// Persistance du nom VA
-const vaInput = document.getElementById("vaName");
-if (vaInput) {
-  // Charge depuis localStorage
-  const savedVa = localStorage.getItem("repurpose_va_name");
-  if (savedVa) vaInput.value = savedVa;
-  // Sauvegarde à chaque modification
-  vaInput.addEventListener("input", () => {
-    localStorage.setItem("repurpose_va_name", vaInput.value.trim());
-  });
+// =========================================================================
+// Chargement de la liste VA depuis Discord (via /api/vas)
+// =========================================================================
+async function loadVAs() {
+  const select = document.getElementById("vaName");
+  if (!select) return;
+  try {
+    const r = await fetch("/api/vas");
+    const data = await r.json();
+    const vas = data.vas || [];
+    const savedVa = localStorage.getItem("repurpose_va_name") || "";
+
+    // Vide et repeuple le select
+    select.innerHTML = '<option value="">-- Sélectionner VA --</option>';
+    vas.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      if (name === savedVa) opt.selected = true;
+      select.appendChild(opt);
+    });
+
+    // Affiche la date de dernière sync
+    if (data.last_sync) {
+      const d = new Date(data.last_sync);
+      select.title = `Dernière sync Discord : ${d.toLocaleString("fr-FR")}`;
+    } else if (!data.sync_enabled) {
+      select.title = "Sync Discord non configurée (variables d'env manquantes)";
+    }
+
+    // Sauvegarde à chaque changement
+    select.addEventListener("change", () => {
+      localStorage.setItem("repurpose_va_name", select.value);
+    });
+  } catch (e) {
+    console.warn("Impossible de charger la liste VA:", e);
+  }
+}
+
+// Bouton resync manuel
+async function resyncVAs() {
+  const select = document.getElementById("vaName");
+  if (!select) return;
+  const oldTitle = select.title;
+  select.title = "Resync en cours...";
+  try {
+    const r = await fetch("/api/vas/sync", { method: "POST" });
+    const data = await r.json();
+    if (r.ok) {
+      await loadVAs();
+      const added = (data.added || []).length;
+      const removed = (data.removed || []).length;
+      alert(`Sync OK ! ${data.vas.length} VA trouvés.\n+${added} ajoutés, -${removed} supprimés`);
+    } else {
+      alert(`Sync échouée : ${data.detail || "erreur inconnue"}`);
+    }
+  } catch (e) {
+    alert(`Sync échouée : ${e}`);
+    select.title = oldTitle;
+  }
 }
 </script>
 </body>
