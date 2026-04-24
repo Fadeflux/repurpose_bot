@@ -242,18 +242,37 @@ async def debug_va_sync():
 
 
 @router.get("/vas")
-async def list_vas():
+async def list_vas(team: str = ""):
     """
     Retourne la liste des VA actuellement en cache (sync Discord).
     Utilisé par le frontend pour peupler le dropdown.
+    Filtrable par équipe via ?team=geelark ou ?team=instagram
     """
     try:
-        from app.services.discord_va_sync import load_cached_vas, is_va_sync_enabled
+        from app.services.discord_va_sync import load_cached_vas, is_va_sync_enabled, get_teams_config
         data = load_cached_vas()
+        vas = data.get("vas", [])
+
+        # Filtre par équipe si demandé
+        if team:
+            team = team.lower().strip()
+            filtered = []
+            for v in vas:
+                if isinstance(v, dict):
+                    v_teams = v.get("teams") or [v.get("team")] or []
+                    if team in [t for t in v_teams if t]:
+                        filtered.append(v)
+            vas = filtered
+
+        # Liste des équipes disponibles
+        teams_available = [t["name"] for t in get_teams_config()]
+
         return {
-            "vas": data.get("vas", []),
+            "vas": vas,
             "last_sync": data.get("last_sync"),
             "sync_enabled": is_va_sync_enabled(),
+            "teams_available": teams_available,
+            "filtered_team": team or None,
         }
     except Exception as e:
         logger.exception(f"Erreur /api/vas: {e}")
@@ -501,6 +520,7 @@ async def process_endpoint(
     upload_to_drive: bool = Form(True, description="Envoyer sur Google Drive"),
     device_choice: str = Form("mix_random", description="Type de device à simuler"),
     va_name: str = Form("", description="Nom du VA qui lance le batch"),
+    team: str = Form("", description="Équipe du VA (geelark, instagram)"),
     custom_ranges: Optional[str] = Form(None),
     enabled_filters: Optional[str] = Form(None),
 ):
@@ -548,12 +568,11 @@ async def process_endpoint(
     import time
     batch_start_time = time.time()
     va_slug = _sanitize_batch_name(va_name) if va_name else ""
+    team_slug = _sanitize_batch_name(team) if team else ""
     base_slug = _sanitize_batch_name(batch_name)
-    # Construit le nom complet : [VA_] nom_batch
-    if va_slug:
-        batch_slug = f"{va_slug}_{base_slug}"
-    else:
-        batch_slug = base_slug
+    # Construit le nom complet : [VA_][Team_] nom_batch
+    parts = [p for p in [va_slug, team_slug, base_slug] if p]
+    batch_slug = "_".join(parts) if parts else "batch"
     job_id = uuid.uuid4().hex[:8]
     full_batch_id = f"{batch_slug}_{job_id}"
 
