@@ -209,13 +209,16 @@ async def notify_va_drive_ready(discord_id: str, folder_url: str = "") -> bool:
         user = await _bot.fetch_user(int(discord_id))
         if not user:
             return False
-        msg = (
-            "✅ **Ton Drive est mis à jour !**\n\n"
-            "Je te laisse regarder dans ton application **Google Drive**.\n"
-            "Les nouvelles vidéos sont dans **Partagé avec moi**."
-        )
         if folder_url:
-            msg += f"\n\n📂 [Ouvrir le dossier directement]({folder_url})"
+            msg = (
+                f"✅ **Ton Drive est mis à jour**, va voir en appuyant sur "
+                f"**[Ouvrir le dossier Drive]({folder_url})**"
+            )
+        else:
+            msg = (
+                "✅ **Ton Drive est mis à jour**, va voir dans ton application "
+                "**Google Drive** (dossier dans **Partagé avec moi**)."
+            )
         await user.send(msg)
         logger.info(f"DM Drive envoyé à {discord_id}")
         return True
