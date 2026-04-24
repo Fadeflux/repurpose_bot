@@ -89,12 +89,18 @@ async def debug_va_sync():
     """Diagnostic complet de la sync VA Discord."""
     import os
     import aiohttp
+    from app.services.discord_va_sync import load_cached_vas, find_va_discord_id
     result = {
         "env_vars": {
             "DISCORD_BOT_TOKEN": bool(os.getenv("DISCORD_BOT_TOKEN")),
             "DISCORD_GUILD_ID": os.getenv("DISCORD_GUILD_ID"),
             "DISCORD_VA_ROLE_ID": os.getenv("DISCORD_VA_ROLE_ID"),
             "DISCORD_VA_ROLE_NAME": os.getenv("DISCORD_VA_ROLE_NAME"),
+        },
+        "cache": load_cached_vas(),
+        "lookup_test": {
+            "Faudel": find_va_discord_id("Faudel"),
+            "andrept30": find_va_discord_id("andrept30"),
         },
         "tests": {},
     }
