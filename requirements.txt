@@ -9,3 +9,5 @@ google-auth==2.35.0
 google-auth-oauthlib==1.2.1
 aiohttp==3.10.10
 discord.py==2.4.0
+Pillow==10.4.0
+piexif==1.1.3
