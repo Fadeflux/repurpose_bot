@@ -737,7 +737,10 @@ async function loadVAs() {
 
     // Vide et repeuple le select
     select.innerHTML = '<option value="">-- Sélectionner VA --</option>';
-    vas.forEach(name => {
+    vas.forEach(v => {
+      // Support ancien format (string) + nouveau (objet {name, discord_id})
+      const name = typeof v === "string" ? v : v.name;
+      if (!name) return;
       const opt = document.createElement("option");
       opt.value = name;
       opt.textContent = name;
