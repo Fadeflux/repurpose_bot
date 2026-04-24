@@ -42,6 +42,12 @@ async def on_startup():
         start_periodic_sync()
     except Exception as e:
         logger.warning(f"Impossible de démarrer la sync VA Discord: {e}")
+    # Lance le bot Discord Gateway (onboarding emails)
+    try:
+        from app.services.discord_bot import start_discord_bot
+        start_discord_bot()
+    except Exception as e:
+        logger.warning(f"Impossible de démarrer le bot Discord Gateway: {e}")
 
 
 @app.get("/")
