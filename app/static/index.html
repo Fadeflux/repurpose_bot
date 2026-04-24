@@ -105,6 +105,11 @@
     transition: all 0.15s;
   }
   .btn:hover { background: var(--panel-2); border-color: var(--accent); }
+  .va-filter-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
   .btn-primary {
     background: var(--accent);
     border-color: var(--accent);
@@ -308,18 +313,18 @@
       <input type="file" id="fileInput" accept="video/*" multiple style="display:none" />
       <button class="btn" onclick="document.getElementById('fileInput').click()">Browse</button>
     </div>
-    <div class="upload-row">
-      <label>Équipe :</label>
+    <div class="upload-row" style="gap: 8px;">
+      <label style="min-width: auto; margin-right: 0;">Équipe :</label>
       <select id="teamSelect" onchange="onTeamChange()" style="background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer;">
         <option value="geelark">Geelark</option>
         <option value="instagram">Instagram</option>
       </select>
-      <label>VA :</label>
-      <select id="vaName" style="background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer; max-width: 280px;">
+      <label style="min-width: auto; margin-left: 12px;">VA :</label>
+      <select id="vaName" style="background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer; max-width: 280px; flex: 1;">
         <option value="">-- Sélectionner VA --</option>
       </select>
       <button class="btn" onclick="resyncVAs()" title="Resync depuis Discord" style="padding: 6px 10px; font-size: 11px;">🔄</button>
-      <label>Modele :</label>
+      <label style="min-width: auto; margin-left: 12px;">Modele :</label>
       <select id="batchName" style="background: var(--panel-2); border: 1px solid var(--border-strong); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer;">
         <option value="">-- Choisir un modele --</option>
         <option value="Modele 1">Modele 1</option>
@@ -335,9 +340,9 @@
         <option value="Modele 11">Modele 11</option>
         <option value="Modele 12">Modele 12</option>
       </select>
-      <div class="inline-toggle">
+      <div class="inline-toggle" style="margin-left: 12px;">
         <input type="checkbox" id="uploadDrive" checked />
-        <label for="uploadDrive">Upload Drive</label>
+        <label for="uploadDrive" style="min-width: auto;">Upload Drive</label>
       </div>
     </div>
   </div>
@@ -452,6 +457,13 @@
         Renseigne l'email Gmail de chaque VA. Les nouveaux dossiers Drive seront partagés automatiquement (lecture seule).
         Quand un VA quitte Discord, son email est supprimé automatiquement à la prochaine sync.
       </p>
+      <!-- Filtre équipe -->
+      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 14px;">
+        <label style="font-size: 13px; color: var(--muted);">Filtrer :</label>
+        <button class="btn va-filter-btn active" onclick="filterAdminVAs('all', this)" style="padding: 6px 12px; font-size: 12px;">Tous</button>
+        <button class="btn va-filter-btn" onclick="filterAdminVAs('geelark', this)" style="padding: 6px 12px; font-size: 12px;">Geelark</button>
+        <button class="btn va-filter-btn" onclick="filterAdminVAs('instagram', this)" style="padding: 6px 12px; font-size: 12px;">Instagram</button>
+      </div>
       <div id="vaAdminList" style="display: flex; flex-direction: column; gap: 8px;"></div>
     </div>
   </details>
@@ -795,7 +807,6 @@ async function loadVAs() {
 
     // Panneau admin : TOUTES les équipes (pas filtré)
     if (adminList) {
-      // Fetch tous les VA sans filtre
       const rAll = await fetch("/api/vas");
       const dataAll = await rAll.json();
       const vasAll = dataAll.vas || [];
@@ -805,8 +816,11 @@ async function loadVAs() {
       } else {
         vasAll.forEach(v => {
           if (typeof v === "string") return;
+          const teamLabel = v.team || "—";
           const teamBadge = v.team ? ` <span style="font-size: 10px; padding: 2px 6px; background: var(--accent-soft); color: var(--accent); border-radius: 4px;">${v.team}</span>` : "";
           const row = document.createElement("div");
+          row.className = "va-row";
+          row.dataset.team = teamLabel;
           row.style.cssText = "display: flex; gap: 8px; align-items: center; padding: 8px; background: var(--panel-2); border-radius: 6px;";
           row.innerHTML = `
             <span style="min-width: 160px; font-weight: 600; font-size: 13px;">${v.name}${teamBadge}</span>
@@ -818,11 +832,32 @@ async function loadVAs() {
           `;
           adminList.appendChild(row);
         });
+        // Ré-applique le filtre actuel après chargement
+        const activeBtn = document.querySelector(".va-filter-btn.active");
+        if (activeBtn) {
+          const currentFilter = activeBtn.textContent.trim().toLowerCase();
+          if (currentFilter !== "tous") filterAdminVAs(currentFilter, activeBtn);
+        }
       }
     }
   } catch (e) {
     console.warn("Impossible de charger la liste VA:", e);
   }
+}
+
+// Filtre les lignes VA du panneau admin par équipe
+function filterAdminVAs(team, btn) {
+  // Met à jour le bouton actif
+  document.querySelectorAll(".va-filter-btn").forEach(b => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  // Filtre les lignes
+  document.querySelectorAll(".va-row").forEach(row => {
+    if (team === "all") {
+      row.style.display = "flex";
+    } else {
+      row.style.display = row.dataset.team === team ? "flex" : "none";
+    }
+  });
 }
 
 // Restore team choice au boot
