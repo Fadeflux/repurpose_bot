@@ -100,10 +100,10 @@ async def _fetch_guild_members(
     return all_members
 
 
-async def fetch_va_members_from_discord() -> List[str]:
+async def fetch_va_members_from_discord() -> List[dict]:
     """
-    Récupère la liste des noms des VA depuis Discord.
-    Retourne une liste triée alphabétiquement.
+    Récupère la liste des VA depuis Discord.
+    Retourne une liste de dicts {name, discord_id}, triée par nom.
     """
     token = _get_bot_token()
     guild_id = _get_guild_id()
@@ -144,23 +144,23 @@ async def fetch_va_members_from_discord() -> List[str]:
             logger.info(f"{len(members)} membre(s) récupéré(s) depuis Discord")
 
             # Filtre ceux qui ont le rôle VA
-            va_names = []
+            va_list = []
             for m in members:
                 if va_role_id in m.get("roles", []):
                     user = m.get("user", {})
-                    # Priorité : nickname serveur > global_name > username
                     name = (
                         m.get("nick")
                         or user.get("global_name")
                         or user.get("username")
                         or ""
                     )
-                    if name:
-                        va_names.append(name)
+                    discord_id = user.get("id")
+                    if name and discord_id:
+                        va_list.append({"name": name, "discord_id": discord_id})
 
-            va_names.sort(key=lambda n: n.lower())
-            logger.info(f"{len(va_names)} VA trouvé(s) avec le rôle ID={va_role_id}")
-            return va_names
+            va_list.sort(key=lambda v: v["name"].lower())
+            logger.info(f"{len(va_list)} VA trouvé(s) avec le rôle ID={va_role_id}")
+            return va_list
     except Exception as e:
         logger.exception(f"Erreur fetch VA Discord: {e}")
         return []
@@ -197,23 +197,29 @@ async def sync_va_list() -> dict:
     Retourne un dict {vas, last_sync, added, removed}.
     """
     existing = load_cached_vas()
-    old_list = set(existing.get("vas", []))
+    old_list = existing.get("vas", [])
+    # Support ancien format (liste de strings) pour rétrocompat
+    old_names = set()
+    for v in old_list:
+        if isinstance(v, str):
+            old_names.add(v)
+        elif isinstance(v, dict):
+            old_names.add(v.get("name", ""))
 
     new_vas = await fetch_va_members_from_discord()
-    if not new_vas and old_list:
-        # Si l'API Discord échoue mais qu'on a un cache, on garde le cache
+    if not new_vas and old_names:
         logger.warning("Discord n'a rien retourné, garde le cache existant")
         return {
-            "vas": sorted(old_list),
+            "vas": old_list,
             "last_sync": existing.get("last_sync"),
             "added": [],
             "removed": [],
             "from_cache": True,
         }
 
-    new_set = set(new_vas)
-    added = sorted(new_set - old_list)
-    removed = sorted(old_list - new_set)
+    new_names = {v["name"] for v in new_vas}
+    added = sorted(new_names - old_names)
+    removed = sorted(old_names - new_names)
 
     save_cached_vas(new_vas)
     logger.info(f"VA sync: {len(new_vas)} total, +{len(added)} ajoutés, -{len(removed)} supprimés")
@@ -225,6 +231,17 @@ async def sync_va_list() -> dict:
         "removed": removed,
         "from_cache": False,
     }
+
+
+def find_va_discord_id(name: str) -> Optional[str]:
+    """Retourne l'ID Discord d'un VA à partir de son nom (via le cache)."""
+    if not name:
+        return None
+    data = load_cached_vas()
+    for v in data.get("vas", []):
+        if isinstance(v, dict) and v.get("name", "").lower() == name.lower():
+            return v.get("discord_id")
+    return None
 
 
 # ---------------------------------------------------------------------------
