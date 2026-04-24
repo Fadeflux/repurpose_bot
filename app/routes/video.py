@@ -637,8 +637,12 @@ async def process_endpoint(
     # Notif Discord (non bloquante)
     duration = time.time() - batch_start_time
     try:
+        # Récupère l'ID Discord du VA pour le mentionner
+        from app.services.discord_va_sync import find_va_discord_id
+        va_discord_id = find_va_discord_id(va_name) if va_name else ""
         await send_batch_notification(
             va_name=va_name,
+            va_discord_id=va_discord_id or "",
             batch_name=batch_slug,
             total_requested=len(files) * copies_per_video,
             succeeded=len(success),
