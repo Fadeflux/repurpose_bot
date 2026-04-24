@@ -90,13 +90,22 @@ async def list_vas():
     Retourne la liste des VA actuellement en cache (sync Discord).
     Utilisé par le frontend pour peupler le dropdown.
     """
-    from app.services.discord_va_sync import load_cached_vas, is_va_sync_enabled
-    data = load_cached_vas()
-    return {
-        "vas": data.get("vas", []),
-        "last_sync": data.get("last_sync"),
-        "sync_enabled": is_va_sync_enabled(),
-    }
+    try:
+        from app.services.discord_va_sync import load_cached_vas, is_va_sync_enabled
+        data = load_cached_vas()
+        return {
+            "vas": data.get("vas", []),
+            "last_sync": data.get("last_sync"),
+            "sync_enabled": is_va_sync_enabled(),
+        }
+    except Exception as e:
+        logger.exception(f"Erreur /api/vas: {e}")
+        return {
+            "vas": [],
+            "last_sync": None,
+            "sync_enabled": False,
+            "error": f"{type(e).__name__}: {str(e)[:200]}",
+        }
 
 
 @router.post("/vas/sync")
@@ -105,17 +114,27 @@ async def force_va_sync():
     Force une resync immédiate avec Discord.
     Utile pour tester ou rafraîchir manuellement.
     """
-    from app.services.discord_va_sync import sync_va_list, is_va_sync_enabled
-    if not is_va_sync_enabled():
-        raise HTTPException(
-            status_code=400,
-            detail="Discord VA sync non configuré (DISCORD_BOT_TOKEN et DISCORD_GUILD_ID requis)",
-        )
     try:
+        from app.services.discord_va_sync import sync_va_list, is_va_sync_enabled
+        if not is_va_sync_enabled():
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Discord VA sync non configuré",
+                    "detail": "Variables manquantes: DISCORD_BOT_TOKEN et/ou DISCORD_GUILD_ID",
+                },
+            )
         result = await sync_va_list()
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Sync échouée: {e}") from e
+        logger.exception(f"Erreur /api/vas/sync: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": type(e).__name__,
+                "detail": str(e)[:500],
+            },
+        )
 
 
 @router.get("/progress/{batch_id}")
