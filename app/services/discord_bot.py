@@ -23,9 +23,11 @@ Permissions Discord requises :
   - Message Content Intent (à activer dans le portail Discord)
 """
 import asyncio
+import io
 import os
+import random
 import re
-from typing import Optional
+from typing import List, Optional
 
 import discord
 from discord.ext import commands
@@ -61,13 +63,128 @@ def _get_onboarding_channel_ids() -> List[int]:
     return channel_ids
 
 
+def _get_spoof_channel_ids() -> List[int]:
+    """Retourne la liste des IDs de canaux spoof-photos (toutes équipes)."""
+    channel_ids = []
+    for env_var in ("DISCORD_SPOOF_CHANNEL_ID", "DISCORD_SPOOF_CHANNEL_ID_INSTAGRAM"):
+        val = os.getenv(env_var, "").strip()
+        if val:
+            try:
+                channel_ids.append(int(val))
+            except ValueError:
+                pass
+    return channel_ids
+
+
 def is_bot_enabled() -> bool:
-    return bool(_get_bot_token() and _get_onboarding_channel_ids())
+    return bool(_get_bot_token() and (_get_onboarding_channel_ids() or _get_spoof_channel_ids()))
 
 
 # =============================================================================
-# Bot instance
+# Handler : spoof photo dans les canaux spoof-photos
 # =============================================================================
+SPOOF_DELETE_AFTER_SECONDS = 120  # 2 minutes
+SUPPORTED_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif")
+
+
+async def _handle_spoof_message(message: "discord.Message"):
+    """
+    Un VA a posté un message dans un canal spoof-photos.
+    Télécharge chaque photo, applique le spoof, renvoie spoofée, supprime l'originale.
+    Photos spoofées auto-supprimées après 2 minutes.
+    """
+    import aiohttp
+    from app.services.photo_spoof import spoof_image
+
+    # Filtre les attachments image
+    image_atts = [
+        a for a in message.attachments
+        if a.filename.lower().endswith(SUPPORTED_IMAGE_EXTS)
+    ]
+
+    if not image_atts:
+        # Pas d'image : ignore + supprime discrètement
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        try:
+            await message.author.send(
+                "❌ Envoie une photo dans le canal **#spoof-photos** "
+                "(formats acceptés : JPG, PNG, HEIC)"
+            )
+        except Exception:
+            pass
+        return
+
+    spoofed_files = []
+    try:
+        async with aiohttp.ClientSession() as session:
+            for att in image_atts:
+                try:
+                    async with session.get(att.url, timeout=30) as r:
+                        if r.status != 200:
+                            logger.warning(f"Impossible de dl {att.filename}: status {r.status}")
+                            continue
+                        raw_bytes = await r.read()
+
+                    # Spoof (sync, mais rapide pour une image)
+                    spoofed_bytes, info = spoof_image(raw_bytes, att.filename)
+
+                    # Nouveau nom : on change l'extension en .jpg si besoin
+                    base_name = att.filename.rsplit(".", 1)[0]
+                    # Ajoute un suffixe aléatoire pour que ça soit pas évident
+                    new_name = f"{base_name}_IMG_{random.randint(1000, 9999)}.jpg"
+
+                    discord_file = discord.File(
+                        fp=io.BytesIO(spoofed_bytes),
+                        filename=new_name,
+                    )
+                    spoofed_files.append((discord_file, info))
+                except Exception as e:
+                    logger.warning(f"Erreur spoof {att.filename}: {e}")
+    except Exception as e:
+        logger.exception(f"Erreur traitement spoof: {e}")
+
+    # Supprime le message original direct
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.warning(f"Erreur suppression original: {e}")
+
+    if not spoofed_files:
+        try:
+            await message.author.send("⚠️ Impossible de traiter ta photo. Réessaie.")
+        except Exception:
+            pass
+        return
+
+    # Envoie les photos spoofées dans le canal
+    files_to_send = [f for f, _ in spoofed_files]
+    info_lines = [f"`{info['device_model']}`" for _, info in spoofed_files]
+    content = (
+        f"📸 {message.author.mention} — Photo(s) spoofée(s) : {', '.join(info_lines)}\n"
+        f"*Auto-supprimée dans 2 minutes*"
+    )
+
+    try:
+        sent_msg = await message.channel.send(content=content, files=files_to_send)
+    except Exception as e:
+        logger.exception(f"Erreur envoi photo spoofée: {e}")
+        return
+
+    # Planifie la suppression dans 2 minutes
+    async def _delete_later():
+        await asyncio.sleep(SPOOF_DELETE_AFTER_SECONDS)
+        try:
+            await sent_msg.delete()
+        except Exception:
+            pass
+
+    asyncio.create_task(_delete_later())
+
+
+
 _intents = discord.Intents.default()
 _intents.message_content = True  # requiert MESSAGE CONTENT INTENT activé
 _intents.members = True           # requiert SERVER MEMBERS INTENT activé
@@ -82,14 +199,19 @@ def _build_bot() -> commands.Bot:
     @bot.event
     async def on_ready():
         logger.info(f"Bot Discord connecté : {bot.user} (ID={bot.user.id})")
-        channel_ids = _get_onboarding_channel_ids()
-        for cid in channel_ids:
+        for cid in _get_onboarding_channel_ids():
             ch = bot.get_channel(cid)
             if ch:
                 logger.info(f"Canal onboarding trouvé : #{ch.name} (guild={ch.guild.name})")
             else:
                 logger.warning(f"Canal onboarding ID={cid} introuvable")
-        # Première sync au démarrage pour s'assurer qu'on a la liste
+        for cid in _get_spoof_channel_ids():
+            ch = bot.get_channel(cid)
+            if ch:
+                logger.info(f"Canal spoof-photos trouvé : #{ch.name} (guild={ch.guild.name})")
+            else:
+                logger.warning(f"Canal spoof-photos ID={cid} introuvable")
+        # Première sync au démarrage
         try:
             await sync_va_list()
         except Exception as e:
@@ -101,12 +223,18 @@ def _build_bot() -> commands.Bot:
         if message.author.bot:
             return
 
-        # Écoute uniquement les canaux onboarding (toutes équipes)
-        channel_ids = _get_onboarding_channel_ids()
-        if not channel_ids or message.channel.id not in channel_ids:
+        onboarding_ids = _get_onboarding_channel_ids()
+        spoof_ids = _get_spoof_channel_ids()
+
+        # Route vers le bon handler selon le canal
+        if message.channel.id in spoof_ids:
+            await _handle_spoof_message(message)
             return
 
-        # Cherche un email dans le message
+        if message.channel.id not in onboarding_ids:
+            return
+
+        # -- Canal onboarding : cherche un email --
         match = EMAIL_REGEX.search(message.content)
         if not match:
             # Pas d'email détecté : supprime le message et explique en DM
