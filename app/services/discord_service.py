@@ -25,9 +25,51 @@ def is_discord_enabled() -> bool:
     return bool(_get_webhook_url())
 
 
+# Labels lisibles pour les device choices
+DEVICE_LABELS = {
+    "mix_random":        "🎲 Mix iPhone + Android",
+    "iphone_random":     "📱 iPhone aléatoire (16/17)",
+    "android_random":    "🅰️ Android aléatoire",
+    "samsung_random":    "🅰️ Samsung aléatoire",
+    "pixel_random":      "🅰️ Google Pixel aléatoire",
+    "iphone_17_pro_max": "📱 iPhone 17 Pro Max",
+    "iphone_17_pro":     "📱 iPhone 17 Pro",
+    "iphone_17_air":     "📱 iPhone 17 Air",
+    "iphone_17":         "📱 iPhone 17",
+    "iphone_16_pro_max": "📱 iPhone 16 Pro Max",
+    "iphone_16_pro":     "📱 iPhone 16 Pro",
+    "iphone_16_plus":    "📱 iPhone 16 Plus",
+    "iphone_16":         "📱 iPhone 16",
+    "iphone_16e":        "📱 iPhone 16e",
+    "samsung_s25_ultra": "🅰️ Galaxy S25 Ultra",
+    "samsung_s25_plus":  "🅰️ Galaxy S25+",
+    "samsung_s25":       "🅰️ Galaxy S25",
+    "samsung_s24_ultra": "🅰️ Galaxy S24 Ultra",
+    "samsung_s24_plus":  "🅰️ Galaxy S24+",
+    "samsung_s24":       "🅰️ Galaxy S24",
+    "samsung_s23_ultra": "🅰️ Galaxy S23 Ultra",
+    "samsung_s23_plus":  "🅰️ Galaxy S23+",
+    "samsung_s23":       "🅰️ Galaxy S23",
+    "pixel_9_pro_xl":    "🅰️ Pixel 9 Pro XL",
+    "pixel_9_pro":       "🅰️ Pixel 9 Pro",
+    "pixel_9":           "🅰️ Pixel 9",
+    "pixel_8_pro":       "🅰️ Pixel 8 Pro",
+    "pixel_8":           "🅰️ Pixel 8",
+    "xiaomi_15_ultra":   "🅰️ Xiaomi 15 Ultra",
+    "xiaomi_15_pro":     "🅰️ Xiaomi 15 Pro",
+    "xiaomi_15":         "🅰️ Xiaomi 15",
+}
+
+
+def _format_device(device_choice: str) -> str:
+    """Retourne le label lisible d'un device_choice."""
+    return DEVICE_LABELS.get(device_choice, device_choice)
+
+
 async def send_batch_notification(
     *,
     va_name: str = "",
+    va_discord_id: str = "",
     batch_name: str = "",
     total_requested: int,
     succeeded: int,
@@ -40,8 +82,7 @@ async def send_batch_notification(
 ) -> bool:
     """
     Envoie une notification Discord après un batch terminé.
-    Non-bloquant, silencieux en cas d'erreur.
-    Retourne True si envoyé avec succès.
+    Si va_discord_id est fourni, mentionne le VA pour qu'il reçoive une notif push.
     """
     url = _get_webhook_url()
     if not url:
@@ -54,16 +95,18 @@ async def send_batch_notification(
 
     # Couleur de l'embed selon le résultat
     if failed == 0:
-        color = 0x22c55e  # vert
+        color = 0x22c55e
         emoji = "✅"
     elif succeeded > 0:
-        color = 0xf59e0b  # orange
+        color = 0xf59e0b
         emoji = "⚠️"
     else:
-        color = 0xef4444  # rouge
+        color = 0xef4444
         emoji = "❌"
 
-    # Construction de l'embed
+    # Champ VA : mention si on a l'ID Discord, sinon juste le nom
+    va_field_value = f"<@{va_discord_id}>" if va_discord_id else (va_name or "—")
+
     fields: List[dict] = [
         {
             "name": "📊 Résultat",
@@ -81,17 +124,14 @@ async def send_batch_notification(
             "value": duration_str,
             "inline": True,
         },
+        {"name": "👤 VA", "value": va_field_value, "inline": True},
+        {"name": "📱 Device", "value": _format_device(device_choice), "inline": True},
     ]
-
-    if va_name:
-        fields.append({"name": "👤 VA", "value": va_name, "inline": True})
-
-    fields.append({"name": "📱 Device", "value": device_choice, "inline": True})
 
     if retries_used > 0:
         fields.append({
             "name": "🔄 Auto-retry",
-            "value": f"{retries_used} tentative(s) r\u00e9ussie(s)",
+            "value": f"{retries_used} tentative(s) réussie(s)",
             "inline": True,
         })
 
@@ -104,26 +144,38 @@ async def send_batch_notification(
         embed["url"] = drive_folder_url
         embed["description"] = f"📂 [Ouvrir le dossier Drive]({drive_folder_url})"
 
+    # Mention dans le content pour déclencher une vraie notif push chez le VA
+    content = f"<@{va_discord_id}>" if va_discord_id else None
+
     payload = {
         "username": "Repurpose Bot",
         "embeds": [embed],
+        # allowed_mentions : autorise uniquement les users mentionnés (évite @everyone)
+        "allowed_mentions": {"parse": ["users"]},
     }
+    if content:
+        payload["content"] = content
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=10) as resp:
+                body = await resp.text()
                 if resp.status < 300:
-                    logger.info(f"Discord notif envoyée : {batch_name}")
+                    logger.info(f"Discord notif envoyée : {batch_name} (status={resp.status})")
                     return True
                 else:
-                    body = await resp.text()
-                    logger.warning(f"Discord webhook erreur {resp.status}: {body[:200]}")
+                    logger.error(
+                        f"Discord webhook ERREUR {resp.status} pour batch '{batch_name}': "
+                        f"body={body[:500]} | "
+                        f"payload_keys={list(payload.keys())} | "
+                        f"has_content={bool(content)}"
+                    )
                     return False
     except asyncio.TimeoutError:
-        logger.warning("Discord webhook timeout")
+        logger.warning(f"Discord webhook TIMEOUT pour batch '{batch_name}'")
         return False
     except Exception as e:
-        logger.warning(f"Discord webhook échec: {type(e).__name__}: {e}")
+        logger.exception(f"Discord webhook EXCEPTION pour batch '{batch_name}': {type(e).__name__}: {e}")
         return False
 
 
