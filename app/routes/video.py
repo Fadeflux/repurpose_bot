@@ -84,6 +84,40 @@ async def get_param_ranges():
     }
 
 
+@router.get("/vas")
+async def list_vas():
+    """
+    Retourne la liste des VA actuellement en cache (sync Discord).
+    Utilisé par le frontend pour peupler le dropdown.
+    """
+    from app.services.discord_va_sync import load_cached_vas, is_va_sync_enabled
+    data = load_cached_vas()
+    return {
+        "vas": data.get("vas", []),
+        "last_sync": data.get("last_sync"),
+        "sync_enabled": is_va_sync_enabled(),
+    }
+
+
+@router.post("/vas/sync")
+async def force_va_sync():
+    """
+    Force une resync immédiate avec Discord.
+    Utile pour tester ou rafraîchir manuellement.
+    """
+    from app.services.discord_va_sync import sync_va_list, is_va_sync_enabled
+    if not is_va_sync_enabled():
+        raise HTTPException(
+            status_code=400,
+            detail="Discord VA sync non configuré (DISCORD_BOT_TOKEN et DISCORD_GUILD_ID requis)",
+        )
+    try:
+        result = await sync_va_list()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sync échouée: {e}") from e
+
+
 @router.get("/progress/{batch_id}")
 async def get_batch_progress(batch_id: str):
     """
