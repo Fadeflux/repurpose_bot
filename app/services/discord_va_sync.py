@@ -194,17 +194,24 @@ def save_cached_vas(vas: List[str]) -> None:
 async def sync_va_list() -> dict:
     """
     Lance une sync manuelle avec Discord.
-    Retourne un dict {vas, last_sync, added, removed}.
+    Préserve les emails stockés pour les VA qui restent.
+    Retire automatiquement les emails des VA qui quittent.
     """
     existing = load_cached_vas()
     old_list = existing.get("vas", [])
-    # Support ancien format (liste de strings) pour rétrocompat
+
+    # Construit un map email par discord_id pour préserver les emails des VA qui restent
+    old_email_by_id = {}
     old_names = set()
     for v in old_list:
         if isinstance(v, str):
             old_names.add(v)
         elif isinstance(v, dict):
             old_names.add(v.get("name", ""))
+            did = v.get("discord_id")
+            email = v.get("email")
+            if did and email:
+                old_email_by_id[did] = email
 
     new_vas = await fetch_va_members_from_discord()
     if not new_vas and old_names:
@@ -217,9 +224,25 @@ async def sync_va_list() -> dict:
             "from_cache": True,
         }
 
+    # Ré-injecte les emails des VA qui sont toujours présents
+    for v in new_vas:
+        did = v.get("discord_id")
+        if did and did in old_email_by_id:
+            v["email"] = old_email_by_id[did]
+
     new_names = {v["name"] for v in new_vas}
     added = sorted(new_names - old_names)
     removed = sorted(old_names - new_names)
+    # Logs utiles : quels emails ont été supprimés car VA parti
+    dropped_emails = []
+    for v in old_list:
+        if isinstance(v, dict) and v.get("email"):
+            did = v.get("discord_id")
+            still_here = any(n.get("discord_id") == did for n in new_vas)
+            if not still_here:
+                dropped_emails.append(v.get("email"))
+    if dropped_emails:
+        logger.info(f"Emails supprimés (VA partis) : {dropped_emails}")
 
     save_cached_vas(new_vas)
     logger.info(f"VA sync: {len(new_vas)} total, +{len(added)} ajoutés, -{len(removed)} supprimés")
@@ -229,6 +252,7 @@ async def sync_va_list() -> dict:
         "last_sync": datetime.utcnow().isoformat() + "Z",
         "added": added,
         "removed": removed,
+        "dropped_emails": dropped_emails,
         "from_cache": False,
     }
 
@@ -242,6 +266,84 @@ def find_va_discord_id(name: str) -> Optional[str]:
         if isinstance(v, dict) and v.get("name", "").lower() == name.lower():
             return v.get("discord_id")
     return None
+
+
+def find_va_by_discord_id(discord_id: str) -> Optional[dict]:
+    """Retourne un VA complet par son Discord ID."""
+    if not discord_id:
+        return None
+    data = load_cached_vas()
+    for v in data.get("vas", []):
+        if isinstance(v, dict) and str(v.get("discord_id")) == str(discord_id):
+            return v
+    return None
+
+
+def get_all_va_emails() -> List[str]:
+    """Retourne la liste des emails de tous les VA enregistrés."""
+    data = load_cached_vas()
+    emails = []
+    for v in data.get("vas", []):
+        if isinstance(v, dict) and v.get("email"):
+            emails.append(v["email"])
+    return emails
+
+
+def set_va_email(discord_id: str, email: str) -> bool:
+    """Met à jour l'email d'un VA identifié par son Discord ID."""
+    if not discord_id or not email:
+        return False
+    data = load_cached_vas()
+    vas = data.get("vas", [])
+    updated = False
+    for v in vas:
+        if isinstance(v, dict) and str(v.get("discord_id")) == str(discord_id):
+            v["email"] = email.lower().strip()
+            updated = True
+            break
+    if updated:
+        # Sauve avec le nouveau format
+        data["vas"] = vas
+        try:
+            VA_CACHE_FILE.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            logger.info(f"Email VA enregistré pour discord_id={discord_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Impossible de sauver email VA: {e}")
+    return False
+
+
+def get_all_va_emails() -> List[str]:
+    """Retourne tous les emails des VA actuellement dans le cache."""
+    data = load_cached_vas()
+    emails = []
+    for v in data.get("vas", []):
+        if isinstance(v, dict) and v.get("email"):
+            emails.append(v["email"])
+    return emails
+
+
+def update_va_email(discord_id: str, email: str) -> bool:
+    """Met à jour l'email d'un VA identifié par son discord_id. Retourne True si OK."""
+    if not discord_id:
+        return False
+    data = load_cached_vas()
+    vas = data.get("vas", [])
+    updated = False
+    for v in vas:
+        if isinstance(v, dict) and v.get("discord_id") == discord_id:
+            email_clean = (email or "").strip().lower()
+            if email_clean:
+                v["email"] = email_clean
+            else:
+                v.pop("email", None)
+            updated = True
+            break
+    if updated:
+        save_cached_vas(vas)
+    return updated
 
 
 # ---------------------------------------------------------------------------
