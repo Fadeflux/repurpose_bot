@@ -238,3 +238,43 @@ def upload_csv(
 def get_folder_link(folder_id: str) -> str:
     """Construit l'URL web d'un dossier Drive."""
     return f"https://drive.google.com/drive/folders/{folder_id}"
+
+
+def share_folder_with_users(
+    folder_id: str,
+    emails: List[str],
+    role: str = "reader",
+) -> dict:
+    """
+    Partage un dossier Drive avec une liste d'emails.
+    role: "reader" (viewer) ou "writer" (editor).
+    Retourne {"success": [...], "failed": [...]}.
+    """
+    client = get_drive_client()
+    if not client or not folder_id or not emails:
+        return {"success": [], "failed": []}
+
+    success = []
+    failed = []
+    for email in emails:
+        email = email.strip().lower()
+        if not email or "@" not in email:
+            continue
+        try:
+            client.permissions().create(
+                fileId=folder_id,
+                body={
+                    "type": "user",
+                    "role": role,
+                    "emailAddress": email,
+                },
+                sendNotificationEmail=False,
+                fields="id",
+                supportsAllDrives=True,
+            ).execute()
+            success.append(email)
+        except Exception as e:
+            logger.warning(f"Drive share failed for {email}: {e}")
+            failed.append({"email": email, "error": str(e)[:200]})
+    logger.info(f"Dossier {folder_id} partagé : OK={len(success)}, KO={len(failed)}")
+    return {"success": success, "failed": failed}
