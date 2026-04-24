@@ -84,6 +84,124 @@ async def get_param_ranges():
     }
 
 
+@router.get("/vas/debug")
+async def debug_va_sync():
+    """Diagnostic complet de la sync VA Discord."""
+    import os
+    import aiohttp
+    result = {
+        "env_vars": {
+            "DISCORD_BOT_TOKEN": bool(os.getenv("DISCORD_BOT_TOKEN")),
+            "DISCORD_GUILD_ID": os.getenv("DISCORD_GUILD_ID"),
+            "DISCORD_VA_ROLE_ID": os.getenv("DISCORD_VA_ROLE_ID"),
+            "DISCORD_VA_ROLE_NAME": os.getenv("DISCORD_VA_ROLE_NAME"),
+        },
+        "tests": {},
+    }
+    token = os.getenv("DISCORD_BOT_TOKEN")
+    guild_id = os.getenv("DISCORD_GUILD_ID")
+    role_id_env = os.getenv("DISCORD_VA_ROLE_ID")
+    if not token or not guild_id:
+        result["error"] = "Variables manquantes"
+        return result
+
+    headers = {"Authorization": f"Bot {token}"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Test 1 : Identité du bot
+            async with session.get(
+                "https://discord.com/api/v10/users/@me", headers=headers, timeout=10
+            ) as r:
+                if r.status == 200:
+                    bot_info = await r.json()
+                    result["tests"]["bot_identity"] = {
+                        "ok": True,
+                        "name": bot_info.get("username"),
+                        "id": bot_info.get("id"),
+                    }
+                else:
+                    result["tests"]["bot_identity"] = {
+                        "ok": False,
+                        "status": r.status,
+                        "body": (await r.text())[:300],
+                    }
+                    return result
+
+            # Test 2 : Infos du serveur
+            async with session.get(
+                f"https://discord.com/api/v10/guilds/{guild_id}", headers=headers, timeout=10
+            ) as r:
+                if r.status == 200:
+                    g = await r.json()
+                    result["tests"]["guild"] = {
+                        "ok": True,
+                        "name": g.get("name"),
+                        "member_count": g.get("approximate_member_count"),
+                    }
+                else:
+                    result["tests"]["guild"] = {
+                        "ok": False,
+                        "status": r.status,
+                        "body": (await r.text())[:300],
+                    }
+                    return result
+
+            # Test 3 : Tous les rôles
+            async with session.get(
+                f"https://discord.com/api/v10/guilds/{guild_id}/roles", headers=headers, timeout=10
+            ) as r:
+                roles = await r.json() if r.status == 200 else []
+                result["tests"]["all_roles"] = [
+                    {"id": x["id"], "name": x["name"]} for x in roles
+                ]
+                if role_id_env:
+                    match = next((x for x in roles if x["id"] == role_id_env), None)
+                    result["tests"]["target_role_by_id"] = match
+
+            # Test 4 : Membres (max 1000 pour le diag)
+            async with session.get(
+                f"https://discord.com/api/v10/guilds/{guild_id}/members?limit=1000",
+                headers=headers,
+                timeout=20,
+            ) as r:
+                if r.status != 200:
+                    result["tests"]["members"] = {
+                        "ok": False,
+                        "status": r.status,
+                        "body": (await r.text())[:500],
+                        "hint": "Si 403 : active 'SERVER MEMBERS INTENT' dans le portail Discord",
+                    }
+                    return result
+                members = await r.json()
+                result["tests"]["members"] = {
+                    "ok": True,
+                    "total_fetched": len(members),
+                }
+                # Filtre par role_id
+                if role_id_env:
+                    matching = []
+                    for m in members:
+                        if role_id_env in m.get("roles", []):
+                            u = m.get("user", {})
+                            matching.append({
+                                "name": m.get("nick") or u.get("global_name") or u.get("username"),
+                                "user_id": u.get("id"),
+                                "roles": m.get("roles"),
+                            })
+                    result["tests"]["members_with_target_role"] = matching
+                # Échantillon des 5 premiers membres avec leurs rôles
+                result["tests"]["sample_members"] = [
+                    {
+                        "name": m.get("nick") or m.get("user", {}).get("global_name") or m.get("user", {}).get("username"),
+                        "roles": m.get("roles"),
+                    }
+                    for m in members[:5]
+                ]
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+    return result
+
+
 @router.get("/vas")
 async def list_vas():
     """
