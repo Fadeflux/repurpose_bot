@@ -436,6 +436,20 @@
     <div id="driveBanner"></div>
     <div id="resultsList"></div>
   </div>
+
+  <!-- Panneau admin VA -->
+  <details style="margin-top: 32px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px;">
+    <summary style="cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text); user-select: none;">
+      ⚙️ Gestion des VA (emails Drive)
+    </summary>
+    <div style="margin-top: 14px;">
+      <p style="font-size: 12px; color: var(--muted); margin-bottom: 14px; line-height: 1.5;">
+        Renseigne l'email Gmail de chaque VA. Les nouveaux dossiers Drive seront partagés automatiquement (lecture seule).
+        Quand un VA quitte Discord, son email est supprimé automatiquement à la prochaine sync.
+      </p>
+      <div id="vaAdminList" style="display: flex; flex-direction: column; gap: 8px;"></div>
+    </div>
+  </details>
 </div>
 
 <script>
@@ -728,40 +742,90 @@ loadVAs();
 // =========================================================================
 async function loadVAs() {
   const select = document.getElementById("vaName");
-  if (!select) return;
+  const adminList = document.getElementById("vaAdminList");
   try {
     const r = await fetch("/api/vas");
     const data = await r.json();
     const vas = data.vas || [];
     const savedVa = localStorage.getItem("repurpose_va_name") || "";
 
-    // Vide et repeuple le select
-    select.innerHTML = '<option value="">-- Sélectionner VA --</option>';
-    vas.forEach(v => {
-      // Support ancien format (string) + nouveau (objet {name, discord_id})
-      const name = typeof v === "string" ? v : v.name;
-      if (!name) return;
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
-      if (name === savedVa) opt.selected = true;
-      select.appendChild(opt);
-    });
-
-    // Affiche la date de dernière sync
-    if (data.last_sync) {
-      const d = new Date(data.last_sync);
-      select.title = `Dernière sync Discord : ${d.toLocaleString("fr-FR")}`;
-    } else if (!data.sync_enabled) {
-      select.title = "Sync Discord non configurée (variables d'env manquantes)";
+    // Dropdown VA
+    if (select) {
+      select.innerHTML = '<option value="">-- Sélectionner VA --</option>';
+      vas.forEach(v => {
+        const name = typeof v === "string" ? v : v.name;
+        if (!name) return;
+        const email = typeof v === "object" ? v.email : null;
+        const opt = document.createElement("option");
+        opt.value = name;
+        // Affiche "Nom — email@gmail.com" ou "Nom ⚠️ (pas d'email)"
+        opt.textContent = email ? `${name} — ${email}` : `${name} ⚠️ (pas d'email)`;
+        if (name === savedVa) opt.selected = true;
+        select.appendChild(opt);
+      });
+      if (data.last_sync) {
+        const d = new Date(data.last_sync);
+        select.title = `Dernière sync Discord : ${d.toLocaleString("fr-FR")}`;
+      }
+      select.addEventListener("change", () => {
+        localStorage.setItem("repurpose_va_name", select.value);
+      });
     }
 
-    // Sauvegarde à chaque changement
-    select.addEventListener("change", () => {
-      localStorage.setItem("repurpose_va_name", select.value);
-    });
+    // Panneau admin : un champ email par VA
+    if (adminList) {
+      adminList.innerHTML = "";
+      if (vas.length === 0) {
+        adminList.innerHTML = '<p style="color: var(--muted); font-size: 13px;">Aucun VA dans le cache. Clique 🔄 pour sync.</p>';
+        return;
+      }
+      vas.forEach(v => {
+        if (typeof v === "string") return; // ancien format
+        const row = document.createElement("div");
+        row.style.cssText = "display: flex; gap: 8px; align-items: center; padding: 8px; background: var(--panel-2); border-radius: 6px;";
+        row.innerHTML = `
+          <span style="min-width: 120px; font-weight: 600; font-size: 13px;">${v.name}</span>
+          <input type="email" placeholder="email@gmail.com" value="${v.email || ''}"
+                 data-discord-id="${v.discord_id}"
+                 style="flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-size: 13px;" />
+          <button class="btn" onclick="saveVAEmail(this)" style="padding: 6px 12px; font-size: 12px;">💾 Save</button>
+          <span class="save-status" style="font-size: 11px; color: var(--muted); min-width: 60px;"></span>
+        `;
+        adminList.appendChild(row);
+      });
+    }
   } catch (e) {
     console.warn("Impossible de charger la liste VA:", e);
+  }
+}
+
+async function saveVAEmail(btn) {
+  const row = btn.closest("div");
+  const input = row.querySelector("input[data-discord-id]");
+  const status = row.querySelector(".save-status");
+  const discordId = input.dataset.discordId;
+  const email = input.value.trim();
+
+  status.textContent = "...";
+  status.style.color = "var(--muted)";
+
+  try {
+    const fd = new FormData();
+    fd.append("discord_id", discordId);
+    fd.append("email", email);
+    const r = await fetch("/api/vas/email", { method: "POST", body: fd });
+    const data = await r.json();
+    if (r.ok && data.ok) {
+      status.textContent = "✓ saved";
+      status.style.color = "#22c55e";
+      setTimeout(() => { status.textContent = ""; }, 2000);
+    } else {
+      status.textContent = "✗ error";
+      status.style.color = "#ef4444";
+    }
+  } catch (e) {
+    status.textContent = "✗ error";
+    status.style.color = "#ef4444";
   }
 }
 
