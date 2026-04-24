@@ -294,6 +294,22 @@ async def force_va_sync():
         )
 
 
+@router.post("/vas/email")
+async def update_va_email_endpoint(
+    discord_id: str = Form(...),
+    email: str = Form(""),
+):
+    """Met à jour (ou supprime si vide) l'email d'un VA."""
+    from app.services.discord_va_sync import update_va_email
+    ok = update_va_email(discord_id, email)
+    if ok:
+        return {"ok": True, "discord_id": discord_id, "email": email}
+    return JSONResponse(
+        status_code=404,
+        content={"ok": False, "error": "VA introuvable pour ce discord_id"},
+    )
+
+
 @router.get("/progress/{batch_id}")
 async def get_batch_progress(batch_id: str):
     """
@@ -548,6 +564,18 @@ async def process_endpoint(
         if drive_folder_id:
             drive_folder_link = get_folder_link(drive_folder_id)
             logger.info(f"[{full_batch_id}] Drive folder: {drive_folder_link}")
+            # Partage auto avec les emails des VA
+            try:
+                from app.services.discord_va_sync import get_all_va_emails
+                from app.services.drive_service import share_folder_with_users
+                va_emails = get_all_va_emails()
+                if va_emails:
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None, share_folder_with_users, drive_folder_id, va_emails, "reader"
+                    )
+            except Exception as e:
+                logger.warning(f"Drive auto-share failed: {e}")
 
     # -- Sauvegarde des fichiers sources (EN PARALLÈLE) ----------------------
     src_paths: List[Path] = []
@@ -672,6 +700,41 @@ async def process_endpoint(
         await loop.run_in_executor(
             None, upload_csv, drive_folder_id, csv_rows, "metadata.csv"
         )
+
+    # Partage le dossier Drive avec l'email du VA + DM privé
+    if drive_folder_id and va_name:
+        try:
+            from app.services.discord_va_sync import find_va_by_discord_id, find_va_discord_id
+            from app.services.drive_service import share_folder_with_users
+
+            va_did = find_va_discord_id(va_name)
+            va_info = find_va_by_discord_id(va_did) if va_did else None
+            va_email = va_info.get("email") if va_info else None
+
+            if va_email:
+                loop = asyncio.get_event_loop()
+                # role="writer" = download + modify/delete autorisés
+                share_result = await loop.run_in_executor(
+                    None,
+                    share_folder_with_users,
+                    drive_folder_id,
+                    [va_email],
+                    "writer",
+                )
+                logger.info(f"[{full_batch_id}] Drive partagé avec {va_email}: {share_result}")
+
+                # DM privé au VA
+                try:
+                    from app.services.discord_bot import notify_va_drive_ready
+                    await notify_va_drive_ready(va_did, drive_folder_link or "")
+                except Exception as e:
+                    logger.warning(f"DM VA Drive ready échoué: {e}")
+            else:
+                logger.info(
+                    f"[{full_batch_id}] Pas d'email enregistré pour {va_name}, pas de partage auto"
+                )
+        except Exception as e:
+            logger.warning(f"Erreur partage Drive avec VA: {e}")
 
     # Notif Discord (non bloquante)
     duration = time.time() - batch_start_time
