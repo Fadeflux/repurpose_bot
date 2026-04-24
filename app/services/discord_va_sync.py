@@ -39,22 +39,54 @@ def _get_bot_token() -> Optional[str]:
 
 
 def _get_guild_id() -> Optional[str]:
+    """ID du serveur Geelark (principal, rétrocompat)."""
     return os.getenv("DISCORD_GUILD_ID")
 
 
 def _get_va_role_id() -> Optional[str]:
-    """ID du rôle VA (prioritaire si défini)."""
+    """ID du rôle VA Geelark (prioritaire si défini)."""
     return os.getenv("DISCORD_VA_ROLE_ID")
 
 
 def _get_va_role_name() -> str:
-    """Nom du rôle (fallback si pas d'ID)."""
+    """Nom du rôle Geelark (fallback si pas d'ID)."""
     return os.getenv("DISCORD_VA_ROLE_NAME", "VA Geelark")
 
 
+def get_teams_config() -> List[dict]:
+    """
+    Retourne la config de toutes les équipes configurées.
+    Chaque équipe : {name, guild_id, role_id, role_name, onboarding_channel_id}
+    """
+    teams = []
+    # Team Geelark (config principale)
+    geelark_gid = os.getenv("DISCORD_GUILD_ID")
+    if geelark_gid:
+        teams.append({
+            "name": "geelark",
+            "label": "Geelark",
+            "guild_id": geelark_gid,
+            "role_id": os.getenv("DISCORD_VA_ROLE_ID"),
+            "role_name": os.getenv("DISCORD_VA_ROLE_NAME", "VA Geelark"),
+            "onboarding_channel_id": os.getenv("DISCORD_ONBOARDING_CHANNEL_ID"),
+        })
+    # Team Instagram (si configurée)
+    insta_gid = os.getenv("DISCORD_GUILD_ID_INSTAGRAM")
+    if insta_gid:
+        teams.append({
+            "name": "instagram",
+            "label": "Instagram",
+            "guild_id": insta_gid,
+            "role_id": os.getenv("DISCORD_VA_ROLE_ID_INSTAGRAM"),
+            "role_name": os.getenv("DISCORD_VA_ROLE_NAME_INSTAGRAM", "VA Instagram"),
+            "onboarding_channel_id": os.getenv("DISCORD_ONBOARDING_CHANNEL_ID_INSTAGRAM"),
+        })
+    return teams
+
+
 def is_va_sync_enabled() -> bool:
-    """Retourne True si la config est complète pour la sync."""
-    return bool(_get_bot_token() and _get_guild_id())
+    """Retourne True si au moins une équipe est configurée."""
+    return bool(_get_bot_token() and get_teams_config())
 
 
 async def _fetch_guild_roles(session: aiohttp.ClientSession, token: str, guild_id: str) -> List[dict]:
@@ -100,70 +132,105 @@ async def _fetch_guild_members(
     return all_members
 
 
-async def fetch_va_members_from_discord() -> List[dict]:
-    """
-    Récupère la liste des VA depuis Discord.
-    Retourne une liste de dicts {name, discord_id}, triée par nom.
-    """
-    token = _get_bot_token()
-    guild_id = _get_guild_id()
-    va_role_id_env = _get_va_role_id()
-    role_name = _get_va_role_name()
+async def _fetch_va_for_team(session: aiohttp.ClientSession, token: str, team: dict) -> List[dict]:
+    """Récupère les VA pour une équipe donnée."""
+    guild_id = team["guild_id"]
+    va_role_id_env = team.get("role_id")
+    role_name = team.get("role_name", "")
+    team_name = team["name"]
 
-    if not token or not guild_id:
-        logger.warning("Discord VA sync désactivé (token ou guild_id manquant)")
+    if not guild_id:
         return []
 
     try:
-        async with aiohttp.ClientSession() as session:
-            va_role_id = None
-
-            # Mode 1 : ID du rôle fourni via env var (plus fiable)
-            if va_role_id_env:
-                va_role_id = va_role_id_env.strip()
-                logger.info(f"Utilisation de DISCORD_VA_ROLE_ID={va_role_id}")
-            else:
-                # Mode 2 : recherche par nom
-                roles = await _fetch_guild_roles(session, token, guild_id)
-                va_role = next(
-                    (r for r in roles if r["name"].lower() == role_name.lower()),
-                    None,
+        va_role_id = None
+        if va_role_id_env:
+            va_role_id = va_role_id_env.strip()
+            logger.info(f"[{team_name}] Utilisation de role_id={va_role_id}")
+        else:
+            roles = await _fetch_guild_roles(session, token, guild_id)
+            va_role = next(
+                (r for r in roles if r["name"].lower() == role_name.lower()),
+                None,
+            )
+            if not va_role:
+                available = [r["name"] for r in roles]
+                logger.error(
+                    f"[{team_name}] Rôle '{role_name}' introuvable. Disponibles: {available}"
                 )
-                if not va_role:
-                    available = [r["name"] for r in roles]
-                    logger.error(
-                        f"Rôle '{role_name}' introuvable dans le serveur. "
-                        f"Rôles disponibles: {available}"
-                    )
-                    return []
-                va_role_id = va_role["id"]
-                logger.info(f"Rôle '{role_name}' trouvé (ID={va_role_id})")
+                return []
+            va_role_id = va_role["id"]
+            logger.info(f"[{team_name}] Rôle '{role_name}' trouvé (ID={va_role_id})")
 
-            # Récupère tous les membres du serveur
-            members = await _fetch_guild_members(session, token, guild_id)
-            logger.info(f"{len(members)} membre(s) récupéré(s) depuis Discord")
+        members = await _fetch_guild_members(session, token, guild_id)
+        logger.info(f"[{team_name}] {len(members)} membre(s) récupéré(s)")
 
-            # Filtre ceux qui ont le rôle VA
-            va_list = []
-            for m in members:
-                if va_role_id in m.get("roles", []):
-                    user = m.get("user", {})
-                    name = (
-                        m.get("nick")
-                        or user.get("global_name")
-                        or user.get("username")
-                        or ""
-                    )
-                    discord_id = user.get("id")
-                    if name and discord_id:
-                        va_list.append({"name": name, "discord_id": discord_id})
-
-            va_list.sort(key=lambda v: v["name"].lower())
-            logger.info(f"{len(va_list)} VA trouvé(s) avec le rôle ID={va_role_id}")
-            return va_list
+        va_list = []
+        for m in members:
+            if va_role_id in m.get("roles", []):
+                user = m.get("user", {})
+                name = (
+                    m.get("nick")
+                    or user.get("global_name")
+                    or user.get("username")
+                    or ""
+                )
+                discord_id = user.get("id")
+                if name and discord_id:
+                    va_list.append({
+                        "name": name,
+                        "discord_id": discord_id,
+                        "team": team_name,
+                    })
+        logger.info(f"[{team_name}] {len(va_list)} VA trouvé(s)")
+        return va_list
     except Exception as e:
-        logger.exception(f"Erreur fetch VA Discord: {e}")
+        logger.exception(f"[{team_name}] Erreur fetch VA: {e}")
         return []
+
+
+async def fetch_va_members_from_discord() -> List[dict]:
+    """
+    Récupère la liste des VA depuis TOUTES les équipes Discord configurées.
+    Chaque VA est retourné avec son équipe dans le champ "team".
+    Retourne une liste de dicts {name, discord_id, team}, triée par équipe puis nom.
+    """
+    token = _get_bot_token()
+    if not token:
+        logger.warning("Discord VA sync désactivé (token manquant)")
+        return []
+
+    teams = get_teams_config()
+    if not teams:
+        logger.warning("Aucune équipe Discord configurée")
+        return []
+
+    all_vas = []
+    async with aiohttp.ClientSession() as session:
+        for team in teams:
+            team_vas = await _fetch_va_for_team(session, token, team)
+            all_vas.extend(team_vas)
+
+    # Déduplication : si le même VA est dans plusieurs équipes (même discord_id),
+    # on garde la première occurrence mais on note la double appartenance
+    seen_ids = {}
+    for v in all_vas:
+        did = v["discord_id"]
+        if did in seen_ids:
+            # Ajoute l'équipe supplémentaire (rare, mais possible)
+            existing = seen_ids[did]
+            existing_teams = existing.get("teams", [existing["team"]])
+            if v["team"] not in existing_teams:
+                existing_teams.append(v["team"])
+            existing["teams"] = existing_teams
+        else:
+            v["teams"] = [v["team"]]
+            seen_ids[did] = v
+
+    unique_vas = list(seen_ids.values())
+    unique_vas.sort(key=lambda v: (v["team"], v["name"].lower()))
+    logger.info(f"Total VA (toutes équipes): {len(unique_vas)}")
+    return unique_vas
 
 
 def load_cached_vas() -> dict:
