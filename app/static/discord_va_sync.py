@@ -42,7 +42,13 @@ def _get_guild_id() -> Optional[str]:
     return os.getenv("DISCORD_GUILD_ID")
 
 
+def _get_va_role_id() -> Optional[str]:
+    """ID du rôle VA (prioritaire si défini)."""
+    return os.getenv("DISCORD_VA_ROLE_ID")
+
+
 def _get_va_role_name() -> str:
+    """Nom du rôle (fallback si pas d'ID)."""
     return os.getenv("DISCORD_VA_ROLE_NAME", "VA Geelark")
 
 
@@ -101,6 +107,7 @@ async def fetch_va_members_from_discord() -> List[str]:
     """
     token = _get_bot_token()
     guild_id = _get_guild_id()
+    va_role_id_env = _get_va_role_id()
     role_name = _get_va_role_name()
 
     if not token or not guild_id:
@@ -109,28 +116,34 @@ async def fetch_va_members_from_discord() -> List[str]:
 
     try:
         async with aiohttp.ClientSession() as session:
-            # 1. Récupère les rôles pour trouver l'ID du rôle VA
-            roles = await _fetch_guild_roles(session, token, guild_id)
-            va_role = next(
-                (r for r in roles if r["name"].lower() == role_name.lower()),
-                None,
-            )
-            if not va_role:
-                available = [r["name"] for r in roles]
-                logger.error(
-                    f"Rôle '{role_name}' introuvable dans le serveur. "
-                    f"Rôles disponibles: {available}"
+            va_role_id = None
+
+            # Mode 1 : ID du rôle fourni via env var (plus fiable)
+            if va_role_id_env:
+                va_role_id = va_role_id_env.strip()
+                logger.info(f"Utilisation de DISCORD_VA_ROLE_ID={va_role_id}")
+            else:
+                # Mode 2 : recherche par nom
+                roles = await _fetch_guild_roles(session, token, guild_id)
+                va_role = next(
+                    (r for r in roles if r["name"].lower() == role_name.lower()),
+                    None,
                 )
-                return []
+                if not va_role:
+                    available = [r["name"] for r in roles]
+                    logger.error(
+                        f"Rôle '{role_name}' introuvable dans le serveur. "
+                        f"Rôles disponibles: {available}"
+                    )
+                    return []
+                va_role_id = va_role["id"]
+                logger.info(f"Rôle '{role_name}' trouvé (ID={va_role_id})")
 
-            va_role_id = va_role["id"]
-            logger.info(f"Rôle '{role_name}' trouvé (ID={va_role_id})")
-
-            # 2. Récupère tous les membres du serveur
+            # Récupère tous les membres du serveur
             members = await _fetch_guild_members(session, token, guild_id)
             logger.info(f"{len(members)} membre(s) récupéré(s) depuis Discord")
 
-            # 3. Filtre ceux qui ont le rôle VA
+            # Filtre ceux qui ont le rôle VA
             va_names = []
             for m in members:
                 if va_role_id in m.get("roles", []):
@@ -146,7 +159,7 @@ async def fetch_va_members_from_discord() -> List[str]:
                         va_names.append(name)
 
             va_names.sort(key=lambda n: n.lower())
-            logger.info(f"{len(va_names)} VA trouvé(s) avec le rôle '{role_name}'")
+            logger.info(f"{len(va_names)} VA trouvé(s) avec le rôle ID={va_role_id}")
             return va_names
     except Exception as e:
         logger.exception(f"Erreur fetch VA Discord: {e}")
