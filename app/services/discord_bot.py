@@ -48,18 +48,21 @@ def _get_bot_token() -> Optional[str]:
     return os.getenv("DISCORD_BOT_TOKEN")
 
 
-def _get_onboarding_channel_id() -> Optional[int]:
-    val = os.getenv("DISCORD_ONBOARDING_CHANNEL_ID", "").strip()
-    if not val:
-        return None
-    try:
-        return int(val)
-    except ValueError:
-        return None
+def _get_onboarding_channel_ids() -> List[int]:
+    """Retourne la liste des IDs de canaux onboarding (toutes équipes)."""
+    channel_ids = []
+    for env_var in ("DISCORD_ONBOARDING_CHANNEL_ID", "DISCORD_ONBOARDING_CHANNEL_ID_INSTAGRAM"):
+        val = os.getenv(env_var, "").strip()
+        if val:
+            try:
+                channel_ids.append(int(val))
+            except ValueError:
+                pass
+    return channel_ids
 
 
 def is_bot_enabled() -> bool:
-    return bool(_get_bot_token() and _get_onboarding_channel_id())
+    return bool(_get_bot_token() and _get_onboarding_channel_ids())
 
 
 # =============================================================================
@@ -79,13 +82,13 @@ def _build_bot() -> commands.Bot:
     @bot.event
     async def on_ready():
         logger.info(f"Bot Discord connecté : {bot.user} (ID={bot.user.id})")
-        channel_id = _get_onboarding_channel_id()
-        if channel_id:
-            ch = bot.get_channel(channel_id)
+        channel_ids = _get_onboarding_channel_ids()
+        for cid in channel_ids:
+            ch = bot.get_channel(cid)
             if ch:
-                logger.info(f"Canal onboarding trouvé : #{ch.name}")
+                logger.info(f"Canal onboarding trouvé : #{ch.name} (guild={ch.guild.name})")
             else:
-                logger.warning(f"Canal onboarding ID={channel_id} introuvable")
+                logger.warning(f"Canal onboarding ID={cid} introuvable")
         # Première sync au démarrage pour s'assurer qu'on a la liste
         try:
             await sync_va_list()
@@ -98,9 +101,9 @@ def _build_bot() -> commands.Bot:
         if message.author.bot:
             return
 
-        # Écoute uniquement le canal onboarding
-        channel_id = _get_onboarding_channel_id()
-        if not channel_id or message.channel.id != channel_id:
+        # Écoute uniquement les canaux onboarding (toutes équipes)
+        channel_ids = _get_onboarding_channel_ids()
+        if not channel_ids or message.channel.id not in channel_ids:
             return
 
         # Cherche un email dans le message
