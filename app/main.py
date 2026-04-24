@@ -36,6 +36,12 @@ if STATIC_DIR.exists():
 @app.on_event("startup")
 async def on_startup():
     logger.info(f"{settings.APP_NAME} v{settings.VERSION} démarré.")
+    # Lance la sync automatique des VA Discord en arrière-plan
+    try:
+        from app.services.discord_va_sync import start_periodic_sync
+        start_periodic_sync()
+    except Exception as e:
+        logger.warning(f"Impossible de démarrer la sync VA Discord: {e}")
 
 
 @app.get("/")
