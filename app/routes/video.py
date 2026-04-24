@@ -84,6 +84,39 @@ async def get_param_ranges():
     }
 
 
+@router.get("/discord-test")
+async def test_discord_notif():
+    """Envoie une notif Discord de test, retourne le résultat."""
+    from app.services.discord_service import send_batch_notification, is_discord_enabled
+    from app.services.discord_va_sync import find_va_discord_id
+
+    if not is_discord_enabled():
+        return {"ok": False, "error": "DISCORD_WEBHOOK_URL non configuré"}
+
+    faudel_id = find_va_discord_id("Faudel")
+    try:
+        ok = await send_batch_notification(
+            va_name="Faudel",
+            va_discord_id=faudel_id or "",
+            batch_name="TEST_notif",
+            total_requested=1,
+            succeeded=1,
+            failed=0,
+            drive_uploaded=1,
+            retries_used=0,
+            duration_seconds=5.0,
+            device_choice="iphone_random",
+            drive_folder_url="https://drive.google.com",
+        )
+        return {
+            "ok": ok,
+            "va_discord_id_found": faudel_id,
+            "detail": "Notif envoyée, check ton Discord" if ok else "Échec, check Railway Deploy Logs",
+        }
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"}
+
+
 @router.get("/vas/debug")
 async def debug_va_sync():
     """Diagnostic complet de la sync VA Discord."""
