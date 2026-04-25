@@ -173,9 +173,9 @@ LOGIN_HTML = """<!DOCTYPE html>
       background: var(--panel-2);
       border: 1px solid var(--border);
       color: var(--text);
-      padding: 12px 14px;
+      padding: 14px;
       border-radius: 8px;
-      font-size: 14px;
+      font-size: 16px;  /* ≥16px pour éviter le zoom auto iOS */
       font-family: inherit;
       margin-bottom: 14px;
       outline: none;
@@ -189,15 +189,20 @@ LOGIN_HTML = """<!DOCTYPE html>
       background: var(--accent);
       border: none;
       color: white;
-      padding: 12px;
+      padding: 14px;
       border-radius: 8px;
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 600;
       cursor: pointer;
       font-family: inherit;
       transition: opacity 0.15s;
     }
     button:hover { opacity: 0.9; }
+    /* Mobile */
+    @media (max-width: 480px) {
+      .login-box { padding: 28px 20px; }
+      h1 { font-size: 19px; }
+    }
     .error {
       background: rgba(239, 68, 68, 0.15);
       color: #ef4444;
