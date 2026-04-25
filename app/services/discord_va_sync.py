@@ -27,11 +27,14 @@ from app.utils.logger import get_logger
 logger = get_logger("discord_va_sync")
 
 
-# Fichier de cache des VA (persistant sur disque)
-VA_CACHE_FILE = Path("/home/claude/repurpose_bot/va_cache.json")
-# En prod Railway, stocke à la racine de l'app
-if os.path.exists("/app"):
+# Fichier de cache des VA (persistant sur volume Railway si configuré)
+# Priorité : /data (volume Railway) > /app (éphémère) > local dev
+if os.path.exists("/data"):
+    VA_CACHE_FILE = Path("/data/va_cache.json")
+elif os.path.exists("/app"):
     VA_CACHE_FILE = Path("/app/va_cache.json")
+else:
+    VA_CACHE_FILE = Path("/home/claude/repurpose_bot/va_cache.json")
 
 
 def _get_bot_token() -> Optional[str]:
