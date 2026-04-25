@@ -84,6 +84,25 @@ async def get_param_ranges():
     }
 
 
+@router.post("/admin/cleanup-drive")
+async def admin_cleanup_drive():
+    """
+    Déclenche manuellement le nettoyage du Drive (suppression des batches > 30j).
+    Le cleanup tourne aussi auto chaque jour à 3h UTC.
+    """
+    try:
+        from app.services.drive_cleanup import run_cleanup
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, run_cleanup)
+        return result
+    except Exception as e:
+        logger.exception(f"Erreur cleanup manuel: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"},
+        )
+
+
 @router.get("/discord-test")
 async def test_discord_notif():
     """Envoie une notif Discord de test, retourne le résultat."""
