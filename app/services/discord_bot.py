@@ -395,10 +395,11 @@ def _build_bot() -> commands.Bot:
         try:
             await message.author.send(
                 f"✅ **Email enregistré !**\n\n"
-                f"Ton email `{email}` a bien été enregistré.\n"
+                f"Ton email `{email}` a bien été enregistré. "
                 f"À partir de maintenant, tu recevras automatiquement les partages Drive "
-                f"quand ton manager générera un batch vidéo pour toi.\n\n"
-                f"Tu verras apparaître les dossiers dans **Partagé avec moi** sur ton Drive."
+                f"quand ton manager générera tes Drive avec les vidéos pour toi.\n\n"
+                f"Tu verras apparaître les dossiers dans **Partagé avec moi** sur ton Drive "
+                f"+ Ton Drive par message ici."
             )
             logger.info(f"Email enregistré pour {display_name} ({discord_id}): {email}")
         except discord.Forbidden:
