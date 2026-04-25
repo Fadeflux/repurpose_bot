@@ -602,18 +602,7 @@ async def process_endpoint(
         if drive_folder_id:
             drive_folder_link = get_folder_link(drive_folder_id)
             logger.info(f"[{full_batch_id}] Drive folder: {drive_folder_link}")
-            # Partage auto avec les emails des VA
-            try:
-                from app.services.discord_va_sync import get_all_va_emails
-                from app.services.drive_service import share_folder_with_users
-                va_emails = get_all_va_emails()
-                if va_emails:
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None, share_folder_with_users, drive_folder_id, va_emails, "reader"
-                    )
-            except Exception as e:
-                logger.warning(f"Drive auto-share failed: {e}")
+            # Le partage avec le VA spécifique est fait plus bas (après que va_name soit traité)
 
     # -- Sauvegarde des fichiers sources (EN PARALLÈLE) ----------------------
     src_paths: List[Path] = []
@@ -749,6 +738,18 @@ async def process_endpoint(
             va_info = find_va_by_discord_id(va_did) if va_did else None
             va_email = va_info.get("email") if va_info else None
 
+            # Fallback : si pas d'email en cache, cherche dans Postgres
+            if not va_email and va_did:
+                try:
+                    from app.services.va_emails_db import load_all_emails, is_db_enabled
+                    if is_db_enabled():
+                        db_emails = load_all_emails()
+                        va_email = db_emails.get(str(va_did))
+                        if va_email:
+                            logger.info(f"Email récupéré depuis Postgres pour {va_name}: {va_email}")
+                except Exception as e:
+                    logger.warning(f"Fallback DB email échoué: {e}")
+
             if va_email:
                 loop = asyncio.get_event_loop()
                 # role="writer" = download + modify/delete autorisés
@@ -759,7 +760,7 @@ async def process_endpoint(
                     [va_email],
                     "writer",
                 )
-                logger.info(f"[{full_batch_id}] Drive partagé avec {va_email}: {share_result}")
+                logger.info(f"[{full_batch_id}] Drive partagé avec {va_email} UNIQUEMENT: {share_result}")
 
                 # DM privé au VA
                 try:
