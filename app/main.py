@@ -48,6 +48,16 @@ async def on_startup():
         logger.info("Login activé (TOOL_PASSWORD configuré)")
     else:
         logger.warning("Login désactivé (TOOL_PASSWORD non défini) - accès libre au tools")
+    # Initialise la DB Postgres pour les emails (table créée si absente)
+    try:
+        from app.services.va_emails_db import init_schema, is_db_enabled
+        if is_db_enabled():
+            init_schema()
+            logger.info("Postgres pour emails VA : OK")
+        else:
+            logger.warning("DATABASE_URL non défini, emails VA stockés uniquement en cache éphémère")
+    except Exception as e:
+        logger.warning(f"Init Postgres échoué: {e}")
     # Lance la sync automatique des VA Discord en arrière-plan
     try:
         from app.services.discord_va_sync import start_periodic_sync
