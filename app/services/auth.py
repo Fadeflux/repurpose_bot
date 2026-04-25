@@ -219,7 +219,7 @@ LOGIN_HTML = """<!DOCTYPE html>
     <div class="lock-icon">🔐</div>
     <h1>Repurpose Bot</h1>
     <p class="subtitle">Accès restreint. Entre ton mot de passe.</p>
-    {error_html}
+    {{ERROR_PLACEHOLDER}}
     <form method="POST" action="/login">
       <input type="password" name="password" placeholder="Mot de passe" autofocus required />
       <button type="submit">Se connecter</button>
@@ -232,4 +232,5 @@ LOGIN_HTML = """<!DOCTYPE html>
 
 def render_login_page(error: str = "") -> HTMLResponse:
     error_html = f'<div class="error">{error}</div>' if error else ""
-    return HTMLResponse(LOGIN_HTML.format(error_html=error_html))
+    html = LOGIN_HTML.replace("{{ERROR_PLACEHOLDER}}", error_html)
+    return HTMLResponse(html)
