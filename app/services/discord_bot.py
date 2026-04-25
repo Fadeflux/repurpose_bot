@@ -326,6 +326,19 @@ def _build_bot() -> commands.Bot:
         discord_id = str(message.author.id)
         display_name = message.author.display_name
 
+        # Détermine l'équipe selon le serveur Discord où le message a été posté
+        from app.services.discord_va_sync import get_teams_config
+        teams = get_teams_config()
+        guild_id_str = str(message.guild.id) if message.guild else ""
+        current_team = None
+        for t in teams:
+            if str(t.get("guild_id", "")) == guild_id_str:
+                current_team = t
+                break
+
+        role_label = current_team.get("role_name", "VA") if current_team else "VA"
+        team_label = current_team.get("label", "ton équipe") if current_team else "ton équipe"
+
         # Vérifie que l'auteur est bien un VA (via son discord_id dans le cache)
         va_info = find_va_by_discord_id(discord_id)
         if not va_info:
@@ -336,8 +349,8 @@ def _build_bot() -> commands.Bot:
                 pass
             try:
                 await message.author.send(
-                    "❌ Tu n'es pas enregistré comme VA dans notre système.\n"
-                    "Contacte l'admin pour obtenir le rôle **VA Geelark**, puis réessaie."
+                    f"❌ Tu n'es pas enregistré comme VA {team_label} dans notre système.\n"
+                    f"Contacte l'admin pour obtenir le rôle **{role_label}**, puis réessaie."
                 )
             except Exception:
                 pass
