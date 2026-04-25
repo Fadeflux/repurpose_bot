@@ -291,6 +291,153 @@
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* =====================================================================
+     RESPONSIVE MOBILE (< 768px) — iPhone, Android
+     ===================================================================== */
+  @media (max-width: 768px) {
+    body {
+      padding: 12px;
+    }
+    .container {
+      max-width: 100%;
+    }
+    h1 {
+      font-size: 20px;
+      padding: 0 60px 0 0;  /* place pour le bouton logout */
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .subtitle {
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    /* Header logout : plus petit sur mobile */
+    .container > a[href="/logout"] {
+      top: 12px !important;
+      right: 12px !important;
+      padding: 5px 10px !important;
+      font-size: 11px !important;
+    }
+
+    /* Upload row : passe en colonne */
+    .upload-row {
+      flex-direction: column;
+      align-items: stretch !important;
+      gap: 8px !important;
+      padding: 8px 0;
+    }
+    .upload-row label {
+      min-width: auto !important;
+      font-size: 13px;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    .upload-row input[type="text"],
+    .upload-row select,
+    .file-display {
+      width: 100% !important;
+      max-width: none !important;
+      flex: none !important;
+      font-size: 16px !important;  /* ≥16px pour éviter le zoom auto iOS */
+      padding: 12px !important;
+    }
+    .upload-row .btn {
+      width: 100%;
+      padding: 12px !important;
+      font-size: 14px !important;
+    }
+    .upload-row .inline-toggle {
+      margin-left: 0 !important;
+      padding: 8px 0;
+    }
+
+    /* Champs et boutons globaux : plus gros pour le tactile */
+    input[type="number"],
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    select,
+    textarea {
+      font-size: 16px !important;  /* anti-zoom iOS */
+      padding: 12px !important;
+    }
+    .btn {
+      padding: 12px 16px !important;
+      font-size: 14px !important;
+    }
+    .btn-primary {
+      padding: 16px !important;
+      font-size: 16px !important;
+    }
+
+    /* Grille des paramètres : 1 colonne sur mobile */
+    .params-grid {
+      grid-template-columns: 1fr !important;
+      gap: 10px !important;
+    }
+    .param-card {
+      padding: 12px !important;
+    }
+    .param-card .label {
+      font-size: 13px !important;
+    }
+    .param-inputs {
+      gap: 8px !important;
+    }
+    .param-inputs input {
+      font-size: 14px !important;
+      padding: 8px !important;
+    }
+
+    /* Status / progress / résultats : padding réduit */
+    .status-bar,
+    .results {
+      padding: 12px !important;
+      font-size: 13px;
+    }
+
+    /* Drive progress bar */
+    #driveProgressWrap > div:first-child {
+      font-size: 12px !important;
+    }
+
+    /* Panneau admin VA : scroll horizontal pour les rangées trop larges */
+    #vaAdminList {
+      overflow-x: auto;
+    }
+    .va-row {
+      flex-wrap: wrap !important;
+      gap: 6px !important;
+    }
+    .va-row > span:first-child {
+      min-width: 100% !important;
+    }
+    .va-row input[type="email"] {
+      flex: 1 1 100% !important;
+    }
+
+    /* Cards de résultats : plus compactes */
+    .results h3 {
+      font-size: 15px;
+    }
+
+    /* Boutons filtre VA */
+    .va-filter-btn {
+      padding: 8px 12px !important;
+      font-size: 12px !important;
+    }
+  }
+
+  /* =====================================================================
+     TRES PETITS ECRANS (< 380px) — vieux iPhone SE, etc.
+     ===================================================================== */
+  @media (max-width: 380px) {
+    body { padding: 8px; }
+    h1 { font-size: 18px; }
+    .upload-box, .results { padding: 12px !important; }
+  }
 </style>
 </head>
 <body>
