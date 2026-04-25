@@ -283,6 +283,17 @@ async def sync_va_list() -> dict:
             if did and email:
                 old_email_by_id[did] = email
 
+    # Charge aussi les emails depuis Postgres (source de vérité durable)
+    try:
+        from app.services.va_emails_db import load_all_emails, is_db_enabled
+        if is_db_enabled():
+            db_emails = load_all_emails()
+            # La DB prime sur le cache si différent
+            old_email_by_id.update(db_emails)
+            logger.info(f"Emails chargés depuis Postgres: {len(db_emails)}")
+    except Exception as e:
+        logger.warning(f"Impossible de charger emails depuis DB: {e}")
+
     new_vas = await fetch_va_members_from_discord()
     if not new_vas and old_names:
         logger.warning("Discord n'a rien retourné, garde le cache existant")
@@ -360,28 +371,41 @@ def get_all_va_emails() -> List[str]:
 
 
 def set_va_email(discord_id: str, email: str) -> bool:
-    """Met à jour l'email d'un VA identifié par son Discord ID."""
+    """Met à jour l'email d'un VA identifié par son Discord ID (cache + DB)."""
     if not discord_id or not email:
         return False
     data = load_cached_vas()
     vas = data.get("vas", [])
     updated = False
+    name = ""
+    team = ""
     for v in vas:
         if isinstance(v, dict) and str(v.get("discord_id")) == str(discord_id):
             v["email"] = email.lower().strip()
+            name = v.get("name", "")
+            team = v.get("team", "")
             updated = True
             break
     if updated:
-        # Sauve avec le nouveau format
+        # Sauve avec le nouveau format (cache JSON éphémère)
         data["vas"] = vas
         try:
             VA_CACHE_FILE.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-            logger.info(f"Email VA enregistré pour discord_id={discord_id}")
-            return True
+            logger.info(f"Email VA enregistré (cache) pour discord_id={discord_id}")
         except Exception as e:
-            logger.error(f"Impossible de sauver email VA: {e}")
+            logger.error(f"Impossible de sauver email VA en cache: {e}")
+
+        # Sauve aussi en Postgres (persistant)
+        try:
+            from app.services.va_emails_db import save_email, is_db_enabled
+            if is_db_enabled():
+                save_email(discord_id, email, name, team)
+        except Exception as e:
+            logger.warning(f"Sauve email Postgres échoué: {e}")
+
+        return True
     return False
 
 
