@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Style 1 — SaaS Moderne</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --panel: #111113;
+    --panel-2: #18181b;
+    --border: #27272a;
+    --border-soft: #1f1f22;
+    --text: #fafafa;
+    --muted: #71717a;
+    --muted-2: #a1a1aa;
+    --accent: #6366f1;
+    --accent-glow: rgba(99, 102, 241, 0.15);
+    --green: #10b981;
+    --orange: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px;
+    background-image:
+      radial-gradient(circle at 0% 0%, rgba(99,102,241,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 100% 100%, rgba(99,102,241,0.03) 0%, transparent 40%);
+  }
+  .container { max-width: 1280px; margin: 0 auto; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 28px;
+    margin-bottom: 28px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .logo {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .logo::before {
+    content: "";
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .badge-on {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--green);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+  }
+  .badge-on::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+  }
+  .badge-info {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--orange);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .btn-logout {
+    padding: 8px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted-2);
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-logout:hover { color: var(--text); border-color: var(--accent); }
+
+  .hero {
+    margin-bottom: 32px;
+  }
+  h1 {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    color: var(--muted-2);
+    font-size: 14px;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted-2);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* Form rows */
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 160px; }
+  .field label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  input, select {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  input:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .file-drop {
+    grid-column: 1 / -1;
+    padding: 32px;
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+    transition: all 0.15s;
+    cursor: pointer;
+  }
+  .file-drop:hover { border-color: var(--accent); color: var(--text); }
+
+  /* Params grid */
+  .params {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+  }
+  .param {
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .param-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .param-head input[type="checkbox"] { accent-color: var(--accent); }
+  .param-inputs { display: flex; gap: 6px; }
+  .param-inputs input {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .param-inputs span {
+    font-size: 10px;
+    color: var(--muted);
+    align-self: center;
+  }
+
+  /* Generate button */
+  .btn-primary {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-top: 16px;
+    box-shadow: 0 4px 14px var(--accent-glow);
+  }
+  .btn-primary:hover {
+    background: #5558e8;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px var(--accent-glow);
+  }
+
+  /* VA admin */
+  .va-list { display: flex; flex-direction: column; gap: 6px; }
+  .va-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--panel-2);
+    border-radius: 8px;
+    border: 1px solid var(--border-soft);
+    transition: border-color 0.15s;
+  }
+  .va-row:hover { border-color: var(--border); }
+  .va-name { font-weight: 500; min-width: 120px; font-size: 13px; }
+  .team-pill {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .team-pill.geelark { background: rgba(99,102,241,0.1); color: var(--accent); }
+  .team-pill.instagram { background: rgba(236,72,153,0.1); color: #ec4899; }
+  .va-row input[type="email"] { flex: 1; padding: 7px 11px; font-size: 12px; }
+  .save-btn {
+    padding: 7px 12px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted-2);
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .save-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  .filter-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .filter-tab {
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted-2);
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  .style-banner {
+    background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.05));
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 24px;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="logo">Repurpose Bot</div>
+    <div class="header-right">
+      <span class="badge badge-on">Drive ON</span>
+      <span class="badge badge-info">60fps · 1080×1920</span>
+      <button class="btn-logout">🔒 Déconnexion</button>
+    </div>
+  </header>
+
+  <div class="style-banner">
+    <strong>Style 1 — SaaS Moderne</strong> · Inspiration Linear/Vercel · Sobre, épuré, professionnel
+  </div>
+
+  <div class="hero">
+    <h1>Génération de batch</h1>
+    <p class="subtitle">Configure les paramètres et lance le traitement</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">📤 Upload & Configuration</span>
+    </div>
+    <div class="row">
+      <div class="field" style="flex: 2;">
+        <label>Fichiers vidéo</label>
+        <div class="file-drop">Glisse tes vidéos ou clique pour parcourir</div>
+      </div>
+    </div>
+    <div class="row" style="margin-top: 12px;">
+      <div class="field"><label>Équipe</label>
+        <select><option>Instagram</option><option>Geelark</option></select>
+      </div>
+      <div class="field"><label>VA</label>
+        <select><option>-- Sélectionner --</option></select>
+      </div>
+      <div class="field"><label>Modèle</label>
+        <select><option>Modele 1</option></select>
+      </div>
+      <div class="field"><label>Copies</label>
+        <input type="number" value="1" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">⚙️ Paramètres de spoof</span>
+    </div>
+    <div class="params">
+      <div class="param">
+        <div class="param-head"><input type="checkbox" checked /> Bitrate</div>
+        <div class="param-inputs"><input value="8000" /><span>—</span><input value="12000" /></div>
+      </div>
+      <div class="param">
+        <div class="param-head"><input type="checkbox" checked /> Brightness</div>
+        <div class="param-inputs"><input value="-0.05" /><span>—</span><input value="0.05" /></div>
+      </div>
+      <div class="param">
+        <div class="param-head"><input type="checkbox" checked /> Contrast</div>
+        <div class="param-inputs"><input value="0.95" /><span>—</span><input value="1.1" /></div>
+      </div>
+      <div class="param">
+        <div class="param-head"><input type="checkbox" checked /> Saturation</div>
+        <div class="param-inputs"><input value="0.95" /><span>—</span><input value="1.15" /></div>
+      </div>
+      <div class="param">
+        <div class="param-head"><input type="checkbox" checked /> Speed</div>
+        <div class="param-inputs"><input value="1.03" /><span>—</span><input value="1.04" /></div>
+      </div>
+      <div class="param">
+        <div class="param-head"><input type="checkbox" checked /> Zoom</div>
+        <div class="param-inputs"><input value="1.03" /><span>—</span><input value="1.06" /></div>
+      </div>
+    </div>
+    <button class="btn-primary">Generate batch</button>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">⚙️ Gestion des VA</span>
+    </div>
+    <div class="filter-tabs">
+      <button class="filter-tab active">Tous</button>
+      <button class="filter-tab">Geelark</button>
+      <button class="filter-tab">Instagram</button>
+    </div>
+    <div class="va-list">
+      <div class="va-row">
+        <span class="va-name">Faudel</span>
+        <span class="team-pill geelark">geelark</span>
+        <input type="email" placeholder="email@gmail.com" />
+        <button class="save-btn">Save</button>
+      </div>
+      <div class="va-row">
+        <span class="va-name">Kentrell</span>
+        <span class="team-pill geelark">geelark</span>
+        <input type="email" value="kentrellbryan24@gmail.com" />
+        <button class="save-btn">Save</button>
+      </div>
+      <div class="va-row">
+        <span class="va-name">Delmonte</span>
+        <span class="team-pill instagram">instagram</span>
+        <input type="email" placeholder="email@gmail.com" />
+        <button class="save-btn">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
