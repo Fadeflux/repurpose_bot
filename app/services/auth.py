@@ -128,13 +128,22 @@ LOGIN_HTML = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Connexion · Repurpose Bot</title>
   <style>
-    :root {
+    :root, [data-theme="dark"] {
       --bg: #0a0a0a;
       --panel: #141414;
       --panel-2: #1c1c1c;
       --border: #262626;
       --text: #f5f5f5;
       --text-muted: #a3a3a3;
+      --accent: #3b82f6;
+    }
+    [data-theme="light"] {
+      --bg: #fafafa;
+      --panel: #ffffff;
+      --panel-2: #f4f4f5;
+      --border: #e4e4e7;
+      --text: #18181b;
+      --text-muted: #71717a;
       --accent: #3b82f6;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -220,16 +229,41 @@ LOGIN_HTML = """<!DOCTYPE html>
   </style>
 </head>
 <body>
+  <div style="position: absolute; top: 16px; right: 16px; display: flex; gap: 8px;">
+    <button onclick="toggleTheme()" id="themeBtn" style="padding: 6px 10px; background: var(--panel); border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; font-size: 14px; cursor: pointer;">🌙</button>
+    <button onclick="toggleLang()" id="langBtn" style="padding: 6px 12px; background: var(--panel); border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">FR</button>
+  </div>
   <div class="login-box">
     <div class="lock-icon">🔐</div>
     <h1>Repurpose Bot</h1>
-    <p class="subtitle">Accès restreint. Entre ton mot de passe.</p>
+    <p class="subtitle" id="loginSubtitle">Accès restreint. Entre ton mot de passe.</p>
     {{ERROR_PLACEHOLDER}}
     <form method="POST" action="/login">
-      <input type="password" name="password" placeholder="Mot de passe" autofocus required />
-      <button type="submit">Se connecter</button>
+      <input type="password" name="password" id="passwordInput" placeholder="Mot de passe" autofocus required />
+      <button type="submit" id="loginBtn">Se connecter</button>
     </form>
   </div>
+<script>
+const LOGIN_T = {
+  fr: { sub: "Accès restreint. Entre ton mot de passe.", placeholder: "Mot de passe", btn: "Se connecter" },
+  en: { sub: "Restricted access. Enter your password.", placeholder: "Password", btn: "Sign in" }
+};
+let lang = localStorage.getItem("lang") || "fr";
+let theme = localStorage.getItem("theme") || "dark";
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", theme);
+  document.getElementById("themeBtn").textContent = theme === "dark" ? "☀️" : "🌙";
+}
+function applyLang() {
+  document.getElementById("loginSubtitle").textContent = LOGIN_T[lang].sub;
+  document.getElementById("passwordInput").placeholder = LOGIN_T[lang].placeholder;
+  document.getElementById("loginBtn").textContent = LOGIN_T[lang].btn;
+  document.getElementById("langBtn").textContent = lang.toUpperCase();
+}
+function toggleTheme() { theme = theme === "dark" ? "light" : "dark"; localStorage.setItem("theme", theme); applyTheme(); }
+function toggleLang() { lang = lang === "fr" ? "en" : "fr"; localStorage.setItem("lang", lang); applyLang(); }
+applyTheme(); applyLang();
+</script>
 </body>
 </html>
 """
