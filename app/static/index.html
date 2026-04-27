@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Style 1 — SaaS Moderne</title>
+<title>Repurpose Bot · Fadeflux</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -12,15 +12,22 @@
     --bg: #0a0a0b;
     --panel: #111113;
     --panel-2: #18181b;
+    --panel-3: #1f1f23;
     --border: #27272a;
     --border-soft: #1f1f22;
+    --border-strong: #3f3f46;
     --text: #fafafa;
     --muted: #71717a;
+    --text-muted: #71717a;
     --muted-2: #a1a1aa;
     --accent: #6366f1;
+    --accent-hover: #5558e8;
     --accent-glow: rgba(99, 102, 241, 0.15);
     --green: #10b981;
     --orange: #f59e0b;
+    --warning: #f59e0b;
+    --red: #ef4444;
+    --warn: #f59e0b;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -32,13 +39,16 @@
     background-image:
       radial-gradient(circle at 0% 0%, rgba(99,102,241,0.04) 0%, transparent 40%),
       radial-gradient(circle at 100% 100%, rgba(99,102,241,0.03) 0%, transparent 40%);
+    background-attachment: fixed;
   }
-  .container { max-width: 1280px; margin: 0 auto; }
+  .container { max-width: 1280px; margin: 0 auto; position: relative; }
+
+  /* HEADER */
   header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding-bottom: 28px;
+    padding-bottom: 24px;
     margin-bottom: 28px;
     border-bottom: 1px solid var(--border-soft);
   }
@@ -49,35 +59,52 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    color: var(--text);
   }
   .logo::before {
     content: "";
-    width: 28px;
-    height: 28px;
+    width: 28px; height: 28px;
     border-radius: 8px;
     background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    flex-shrink: 0;
   }
+  .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .badge {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 10px;
+    padding: 5px 12px;
     border-radius: 20px;
     font-size: 11px;
     font-weight: 500;
     letter-spacing: 0.02em;
   }
-  .badge-on {
-    background: rgba(16, 185, 129, 0.1);
-    color: var(--green);
-    border: 1px solid rgba(16, 185, 129, 0.2);
+  .badge-on, .drive-status.on {
+    background: rgba(16, 185, 129, 0.1) !important;
+    color: var(--green) !important;
+    border: 1px solid rgba(16, 185, 129, 0.2) !important;
+    padding: 5px 12px !important;
+    border-radius: 20px !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
   }
-  .badge-on::before {
+  .badge-on::before, .drive-status.on::before {
     content: "";
     width: 6px; height: 6px;
     border-radius: 50%;
     background: var(--green);
     box-shadow: 0 0 8px var(--green);
+    margin-right: 2px;
+    display: inline-block;
+  }
+  .drive-status {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--red);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
   }
   .badge-info {
     background: rgba(245, 158, 11, 0.1);
@@ -85,9 +112,8 @@
     border: 1px solid rgba(245, 158, 11, 0.2);
     font-family: 'JetBrains Mono', monospace;
   }
-  .header-right { display: flex; align-items: center; gap: 12px; }
   .btn-logout {
-    padding: 8px 14px;
+    padding: 7px 14px;
     background: var(--panel);
     border: 1px solid var(--border);
     color: var(--muted-2);
@@ -95,25 +121,30 @@
     font-size: 12px;
     font-weight: 500;
     cursor: pointer;
+    text-decoration: none;
     transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
   .btn-logout:hover { color: var(--text); border-color: var(--accent); }
 
-  .hero {
-    margin-bottom: 32px;
-  }
+  /* HERO */
+  .hero { margin-bottom: 28px; }
   h1 {
-    font-size: 32px;
+    font-size: 28px;
     font-weight: 700;
     letter-spacing: -0.03em;
     margin-bottom: 8px;
   }
   .subtitle {
     color: var(--muted-2);
-    font-size: 14px;
+    font-size: 13px;
+    line-height: 1.5;
   }
+  .warn { color: var(--orange); font-weight: 600; }
 
-  /* Cards */
+  /* CARDS */
   .card {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -121,93 +152,95 @@
     padding: 20px;
     margin-bottom: 16px;
   }
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-  }
   .card-title {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--muted-2);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
 
-  /* Form rows */
-  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  .field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 160px; }
-  .field label {
+  /* UPLOAD BOX (alias .upload-box pour le JS existant) */
+  .upload-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .upload-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 0;
+  }
+  .upload-row + .upload-row { border-top: 1px solid var(--border-soft); padding-top: 14px; margin-top: 6px; }
+  .upload-row label {
     font-size: 12px;
     font-weight: 500;
-    color: var(--muted);
+    color: var(--muted-2);
+    min-width: 130px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
+  .file-display {
+    flex: 1;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--muted-2);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+  }
+  .file-display.has-files { color: var(--text); border-color: var(--accent); }
+
   input, select {
     background: var(--panel-2);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 10px 14px;
+    padding: 9px 12px;
     border-radius: 8px;
-    font-size: 14px;
+    font-size: 13px;
     font-family: inherit;
     outline: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition: all 0.15s;
   }
   input:focus, select:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-glow);
   }
-  .file-drop {
-    grid-column: 1 / -1;
-    padding: 32px;
-    border: 2px dashed var(--border);
-    border-radius: 10px;
-    text-align: center;
-    color: var(--muted);
-    font-size: 14px;
-    transition: all 0.15s;
+  select { cursor: pointer; }
+
+  .inline-toggle { display: flex; align-items: center; gap: 8px; }
+  .inline-toggle input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 16px; height: 16px;
     cursor: pointer;
   }
-  .file-drop:hover { border-color: var(--accent); color: var(--text); }
+  .inline-toggle label { min-width: auto !important; cursor: pointer; }
 
-  /* Params grid */
-  .params {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 12px;
-  }
-  .param {
+  /* BOUTONS */
+  .btn {
     background: var(--panel-2);
-    border: 1px solid var(--border-soft);
-    border-radius: 10px;
-    padding: 14px;
-  }
-  .param-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 16px;
+    border-radius: 8px;
     font-size: 13px;
     font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
   }
-  .param-head input[type="checkbox"] { accent-color: var(--accent); }
-  .param-inputs { display: flex; gap: 6px; }
-  .param-inputs input {
-    flex: 1;
-    padding: 6px 8px;
-    font-size: 12px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-  .param-inputs span {
-    font-size: 10px;
-    color: var(--muted);
-    align-self: center;
-  }
-
-  /* Generate button */
+  .btn:hover { border-color: var(--accent); }
   .btn-primary {
     width: 100%;
     padding: 14px;
@@ -223,72 +256,258 @@
     box-shadow: 0 4px 14px var(--accent-glow);
   }
   .btn-primary:hover {
-    background: #5558e8;
+    background: var(--accent-hover);
     transform: translateY(-1px);
     box-shadow: 0 6px 20px var(--accent-glow);
   }
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
 
-  /* VA admin */
-  .va-list { display: flex; flex-direction: column; gap: 6px; }
+  /* PARAMS GRID */
+  .params-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .param-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    padding: 14px;
+    transition: border-color 0.15s;
+  }
+  .param-card:hover { border-color: var(--border); }
+  .param-card.disabled { opacity: 0.5; }
+  .param-card .label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 10px;
+  }
+  .param-card .label input[type="checkbox"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .param-inputs { display: flex; gap: 6px; align-items: center; }
+  .param-inputs input {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    min-width: 0;
+  }
+  .param-inputs span {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .min-max {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-right: 4px;
+  }
+
+  /* FOOTER ROW (copies + speed) */
+  .footer-row {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .copies-box {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 240px;
+  }
+  .copies-box label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted-2);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .copies-box input[type="number"] {
+    width: 70px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .total-preview {
+    color: var(--muted-2);
+    font-size: 13px;
+    margin-left: auto;
+  }
+  .total-preview strong { color: var(--accent); font-weight: 600; }
+
+  /* STATUS / RESULTS */
+  .status-bar {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--muted-2);
+    display: none;
+  }
+  .status-bar.show { display: block; }
+  .status-bar.ok { border-color: rgba(16, 185, 129, 0.3); color: var(--green); }
+  .status-bar.error { border-color: rgba(239, 68, 68, 0.3); color: var(--red); }
+
+  .results {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-top: 16px;
+    display: none;
+  }
+  .results.show { display: block; }
+  .results h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 14px;
+    color: var(--muted-2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .drive-banner {
+    background: linear-gradient(135deg, rgba(66, 133, 244, 0.1), rgba(52, 168, 83, 0.05));
+    border: 1px solid rgba(66, 133, 244, 0.3);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+    font-size: 13px;
+  }
+  .drive-banner a {
+    color: #4285f4;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .drive-banner a:hover { text-decoration: underline; }
+
+  .result-item {
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-soft);
+    margin-bottom: 6px;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .result-item.success { border-left: 3px solid var(--green); }
+  .result-item.error { border-left: 3px solid var(--red); }
+  .result-item a { color: var(--accent); text-decoration: none; font-size: 12px; }
+  .result-item a:hover { text-decoration: underline; }
+
+  /* DROPDOWN ADMIN VA */
+  details summary {
+    list-style: none;
+    cursor: pointer;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before {
+    content: "▶";
+    display: inline-block;
+    margin-right: 8px;
+    transition: transform 0.2s;
+    color: var(--muted);
+    font-size: 10px;
+  }
+  details[open] summary::before { transform: rotate(90deg); }
+
+  .va-filter-btn {
+    background: transparent !important;
+    border: 1px solid var(--border) !important;
+    color: var(--muted-2) !important;
+  }
+  .va-filter-btn.active {
+    background: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: white !important;
+  }
+
   .va-row {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px;
+    padding: 10px 14px;
     background: var(--panel-2);
-    border-radius: 8px;
     border: 1px solid var(--border-soft);
+    border-radius: 8px;
     transition: border-color 0.15s;
+    flex-wrap: wrap;
   }
   .va-row:hover { border-color: var(--border); }
-  .va-name { font-weight: 500; min-width: 120px; font-size: 13px; }
+  .va-name { font-weight: 500; font-size: 13px; min-width: 110px; }
   .team-pill {
     font-size: 10px;
     padding: 2px 8px;
     border-radius: 4px;
-    font-weight: 500;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
-  .team-pill.geelark { background: rgba(99,102,241,0.1); color: var(--accent); }
-  .team-pill.instagram { background: rgba(236,72,153,0.1); color: #ec4899; }
-  .va-row input[type="email"] { flex: 1; padding: 7px 11px; font-size: 12px; }
-  .save-btn {
-    padding: 7px 12px;
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--muted-2);
-    border-radius: 6px;
-    font-size: 11px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .save-btn:hover { color: var(--text); border-color: var(--accent); }
+  .team-pill.geelark { background: rgba(99,102,241,0.15); color: var(--accent); }
+  .team-pill.instagram { background: rgba(236,72,153,0.15); color: #ec4899; }
+  .va-row input[type="email"] { flex: 1; padding: 7px 11px; font-size: 12px; min-width: 200px; }
+  .va-row .btn { padding: 7px 12px; font-size: 11px; }
 
-  .filter-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
-  .filter-tab {
-    padding: 6px 12px;
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--muted-2);
-    border-radius: 6px;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.15s;
+  /* SPINNER */
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
   }
-  .filter-tab.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: white;
-  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  .style-banner {
-    background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.05));
-    border: 1px solid var(--accent);
-    border-radius: 10px;
-    padding: 14px 18px;
-    margin-bottom: 24px;
-    font-size: 13px;
+  /* RESPONSIVE MOBILE */
+  @media (max-width: 768px) {
+    body { padding: 14px; }
+    h1 { font-size: 22px; }
+    header { flex-wrap: wrap; gap: 12px; padding-bottom: 18px; margin-bottom: 22px; }
+    .header-right { width: 100%; justify-content: flex-start; }
+    .badge { font-size: 10px; padding: 4px 10px; }
+    .upload-row { flex-direction: column; align-items: stretch; gap: 8px; }
+    .upload-row label { min-width: auto; }
+    .upload-row select, .upload-row .file-display, .upload-row .btn {
+      width: 100%;
+      font-size: 16px !important;
+    }
+    input, select, textarea { font-size: 16px !important; }
+    .params-grid { grid-template-columns: 1fr; }
+    .copies-box { flex-direction: column; align-items: stretch; gap: 10px; }
+    .total-preview { margin-left: 0; }
+    .va-row > .va-name { min-width: 100%; }
+    .va-row input[type="email"] { flex: 1 1 100%; min-width: 0; }
+    .btn-primary { padding: 16px; font-size: 16px; }
+  }
+  @media (max-width: 380px) {
+    body { padding: 10px; }
+    .card, .upload-box, .results { padding: 14px; }
   }
 </style>
 </head>
@@ -297,110 +516,635 @@
   <header>
     <div class="logo">Repurpose Bot</div>
     <div class="header-right">
-      <span class="badge badge-on">Drive ON</span>
+      <span class="drive-status" id="driveStatus">Drive : …</span>
       <span class="badge badge-info">60fps · 1080×1920</span>
-      <button class="btn-logout">🔒 Déconnexion</button>
+      <a href="/logout" class="btn-logout">🔒 Déconnexion</a>
     </div>
   </header>
 
-  <div class="style-banner">
-    <strong>Style 1 — SaaS Moderne</strong> · Inspiration Linear/Vercel · Sobre, épuré, professionnel
-  </div>
-
   <div class="hero">
     <h1>Génération de batch</h1>
-    <p class="subtitle">Configure les paramètres et lance le traitement</p>
+    <p class="subtitle">
+      <span class="warn">IMPORTANT :</span>
+      Décoche une case pour désactiver un filtre. Valeurs randomisées entre Min et Max.
+    </p>
   </div>
 
-  <div class="card">
-    <div class="card-header">
-      <span class="card-title">📤 Upload & Configuration</span>
+  <!-- Upload + batch name -->
+  <div class="upload-box">
+    <div class="card-title">📤 Upload & Configuration</div>
+    <div class="upload-row">
+      <label>Fichiers vidéo</label>
+      <div class="file-display" id="fileDisplay">Aucun fichier sélectionné</div>
+      <input type="file" id="fileInput" accept="video/*" multiple style="display:none" />
+      <button class="btn" onclick="document.getElementById('fileInput').click()">Browse</button>
     </div>
-    <div class="row">
-      <div class="field" style="flex: 2;">
-        <label>Fichiers vidéo</label>
-        <div class="file-drop">Glisse tes vidéos ou clique pour parcourir</div>
-      </div>
-    </div>
-    <div class="row" style="margin-top: 12px;">
-      <div class="field"><label>Équipe</label>
-        <select><option>Instagram</option><option>Geelark</option></select>
-      </div>
-      <div class="field"><label>VA</label>
-        <select><option>-- Sélectionner --</option></select>
-      </div>
-      <div class="field"><label>Modèle</label>
-        <select><option>Modele 1</option></select>
-      </div>
-      <div class="field"><label>Copies</label>
-        <input type="number" value="1" />
+    <div class="upload-row">
+      <label>Équipe</label>
+      <select id="teamSelect" onchange="onTeamChange()" style="max-width: 160px;">
+        <option value="geelark">Geelark</option>
+        <option value="instagram">Instagram</option>
+      </select>
+      <select id="vaName" style="max-width: 280px; flex: 1;">
+        <option value="">-- Sélectionner VA --</option>
+      </select>
+      <button class="btn" onclick="resyncVAs()" title="Resync depuis Discord" style="padding: 7px 11px;">🔄</button>
+      <select id="batchName" style="max-width: 200px;">
+        <option value="">-- Choisir un modele --</option>
+        <option value="Modele 1">Modele 1</option>
+        <option value="Modele 2">Modele 2</option>
+        <option value="Modele 3">Modele 3</option>
+        <option value="Modele 4">Modele 4</option>
+        <option value="Modele 5">Modele 5</option>
+        <option value="Modele 6">Modele 6</option>
+        <option value="Modele 7">Modele 7</option>
+        <option value="Modele 8">Modele 8</option>
+        <option value="Modele 9">Modele 9</option>
+        <option value="Modele 10">Modele 10</option>
+        <option value="Modele 11">Modele 11</option>
+        <option value="Modele 12">Modele 12</option>
+      </select>
+      <div class="inline-toggle">
+        <input type="checkbox" id="uploadDrive" checked />
+        <label for="uploadDrive">Upload Drive</label>
       </div>
     </div>
   </div>
 
+  <!-- Params grid -->
   <div class="card">
-    <div class="card-header">
-      <span class="card-title">⚙️ Paramètres de spoof</span>
-    </div>
-    <div class="params">
-      <div class="param">
-        <div class="param-head"><input type="checkbox" checked /> Bitrate</div>
-        <div class="param-inputs"><input value="8000" /><span>—</span><input value="12000" /></div>
-      </div>
-      <div class="param">
-        <div class="param-head"><input type="checkbox" checked /> Brightness</div>
-        <div class="param-inputs"><input value="-0.05" /><span>—</span><input value="0.05" /></div>
-      </div>
-      <div class="param">
-        <div class="param-head"><input type="checkbox" checked /> Contrast</div>
-        <div class="param-inputs"><input value="0.95" /><span>—</span><input value="1.1" /></div>
-      </div>
-      <div class="param">
-        <div class="param-head"><input type="checkbox" checked /> Saturation</div>
-        <div class="param-inputs"><input value="0.95" /><span>—</span><input value="1.15" /></div>
-      </div>
-      <div class="param">
-        <div class="param-head"><input type="checkbox" checked /> Speed</div>
-        <div class="param-inputs"><input value="1.03" /><span>—</span><input value="1.04" /></div>
-      </div>
-      <div class="param">
-        <div class="param-head"><input type="checkbox" checked /> Zoom</div>
-        <div class="param-inputs"><input value="1.03" /><span>—</span><input value="1.06" /></div>
-      </div>
-    </div>
-    <button class="btn-primary">Generate batch</button>
+    <div class="card-title">⚙️ Paramètres de spoof</div>
+    <div class="params-grid" id="paramsGrid"></div>
   </div>
 
-  <div class="card">
-    <div class="card-header">
-      <span class="card-title">⚙️ Gestion des VA</span>
+  <!-- Footer: copies + speed + device -->
+  <div class="footer-row">
+    <div class="copies-box">
+      <label>Copies / vidéo</label>
+      <input type="number" id="copies" value="1" min="1" max="100" onchange="updatePreview()" />
+      <span class="total-preview" id="totalPreview">0 vidéos × 1 copie = <strong>0 total</strong></span>
     </div>
-    <div class="filter-tabs">
-      <button class="filter-tab active">Tous</button>
-      <button class="filter-tab">Geelark</button>
-      <button class="filter-tab">Instagram</button>
-    </div>
-    <div class="va-list">
-      <div class="va-row">
-        <span class="va-name">Faudel</span>
-        <span class="team-pill geelark">geelark</span>
-        <input type="email" placeholder="email@gmail.com" />
-        <button class="save-btn">Save</button>
-      </div>
-      <div class="va-row">
-        <span class="va-name">Kentrell</span>
-        <span class="team-pill geelark">geelark</span>
-        <input type="email" value="kentrellbryan24@gmail.com" />
-        <button class="save-btn">Save</button>
-      </div>
-      <div class="va-row">
-        <span class="va-name">Delmonte</span>
-        <span class="team-pill instagram">instagram</span>
-        <input type="email" placeholder="email@gmail.com" />
-        <button class="save-btn">Save</button>
-      </div>
+    <div class="copies-box" style="flex: 0 0 auto;">
+      <label>Speed</label>
+      <select id="concurrency">
+        <option value="1">🐢 Lent</option>
+        <option value="2">🚶 Normal</option>
+        <option value="3">🏃 Rapide</option>
+        <option value="4" selected>⚡ Ultra</option>
+        <option value="6">🚀 Max</option>
+      </select>
     </div>
   </div>
+
+  <div class="footer-row">
+    <div class="copies-box" style="flex: 1;">
+      <label>Device simulé</label>
+      <select id="deviceChoice" style="flex: 1;">
+        <optgroup label="🎲 Aléatoire">
+          <option value="mix_random" selected>Mix iPhone + Android (50/50)</option>
+          <option value="iphone_random">📱 iPhone aléatoire (16 ou 17)</option>
+          <option value="android_random">🅰️ Android aléatoire</option>
+          <option value="samsung_random">Samsung aléatoire</option>
+          <option value="pixel_random">Google Pixel aléatoire</option>
+        </optgroup>
+        <optgroup label="📱 iPhone 17 (iOS 26)">
+          <option value="iphone_17_pro_max">iPhone 17 Pro Max</option>
+          <option value="iphone_17_pro">iPhone 17 Pro</option>
+          <option value="iphone_17_air">iPhone 17 Air</option>
+          <option value="iphone_17">iPhone 17</option>
+        </optgroup>
+        <optgroup label="📱 iPhone 16 (iOS 18/26)">
+          <option value="iphone_16_pro_max">iPhone 16 Pro Max</option>
+          <option value="iphone_16_pro">iPhone 16 Pro</option>
+          <option value="iphone_16_plus">iPhone 16 Plus</option>
+          <option value="iphone_16">iPhone 16</option>
+          <option value="iphone_16e">iPhone 16e</option>
+        </optgroup>
+        <optgroup label="🅰️ Samsung Galaxy S25">
+          <option value="samsung_s25_ultra">Galaxy S25 Ultra</option>
+          <option value="samsung_s25_plus">Galaxy S25+</option>
+          <option value="samsung_s25">Galaxy S25</option>
+        </optgroup>
+        <optgroup label="🅰️ Samsung Galaxy S24">
+          <option value="samsung_s24_ultra">Galaxy S24 Ultra</option>
+          <option value="samsung_s24_plus">Galaxy S24+</option>
+          <option value="samsung_s24">Galaxy S24</option>
+        </optgroup>
+        <optgroup label="🅰️ Samsung Galaxy S23">
+          <option value="samsung_s23_ultra">Galaxy S23 Ultra</option>
+          <option value="samsung_s23_plus">Galaxy S23+</option>
+          <option value="samsung_s23">Galaxy S23</option>
+        </optgroup>
+        <optgroup label="🅰️ Google Pixel">
+          <option value="pixel_9_pro_xl">Pixel 9 Pro XL</option>
+          <option value="pixel_9_pro">Pixel 9 Pro</option>
+          <option value="pixel_9">Pixel 9</option>
+          <option value="pixel_8_pro">Pixel 8 Pro</option>
+          <option value="pixel_8">Pixel 8</option>
+        </optgroup>
+        <optgroup label="🅰️ Xiaomi">
+          <option value="xiaomi_15_ultra">Xiaomi 15 Ultra</option>
+          <option value="xiaomi_15_pro">Xiaomi 15 Pro</option>
+          <option value="xiaomi_15">Xiaomi 15</option>
+        </optgroup>
+      </select>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" id="generateBtn" onclick="generate()">Generate batch</button>
+
+  <div class="status-bar" id="statusBar"></div>
+
+  <!-- Drive upload progress bar -->
+  <div id="driveProgressWrap" style="display:none; margin-top:12px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <span style="font-size:13px; color:var(--muted-2);">📁 Upload Google Drive</span>
+      <span style="font-size:13px; color:var(--muted-2); font-family: 'JetBrains Mono', monospace;" id="driveProgressText">0 / 0</span>
+    </div>
+    <div style="background:var(--panel-2); border-radius:8px; height:20px; overflow:hidden; border:1px solid var(--border);">
+      <div id="driveProgressBar" style="background:linear-gradient(90deg, #4285f4, #34a853); height:100%; width:0%; transition:width 0.3s ease; display:flex; align-items:center; justify-content:center; color:white; font-size:12px; font-weight:600;"></div>
+    </div>
+  </div>
+
+  <div class="results" id="resultsBox">
+    <h3>Résultats</h3>
+    <div id="driveBanner"></div>
+    <div id="resultsList"></div>
+  </div>
+
+  <!-- Panneau admin VA -->
+  <details class="card" style="margin-top: 24px;">
+    <summary style="font-size: 13px; font-weight: 600; color: var(--muted-2); user-select: none; text-transform: uppercase; letter-spacing: 0.05em;">
+      ⚙️ Gestion des VA (emails Drive)
+    </summary>
+    <div style="margin-top: 16px;">
+      <p style="font-size: 12px; color: var(--muted); margin-bottom: 14px; line-height: 1.5;">
+        Renseigne l'email Gmail de chaque VA. Les nouveaux dossiers Drive seront partagés automatiquement.
+        Quand un VA quitte Discord, son email est supprimé automatiquement à la prochaine sync.
+      </p>
+      <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 14px; flex-wrap: wrap;">
+        <span style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-right: 4px;">Filtrer :</span>
+        <button class="btn va-filter-btn active" onclick="filterAdminVAs('all', this)" style="padding: 6px 12px; font-size: 11px;">Tous</button>
+        <button class="btn va-filter-btn" onclick="filterAdminVAs('geelark', this)" style="padding: 6px 12px; font-size: 11px;">Geelark</button>
+        <button class="btn va-filter-btn" onclick="filterAdminVAs('instagram', this)" style="padding: 6px 12px; font-size: 11px;">Instagram</button>
+      </div>
+      <div id="vaAdminList" style="display: flex; flex-direction: column; gap: 8px;"></div>
+    </div>
+  </details>
 </div>
+
+<script>
+// =========================================================================
+// Config des paramètres (aligné avec le backend)
+// =========================================================================
+const PARAMS = [
+  { key: "bitrate",    label: "Video Bitrate",min: 1000,  max: 20000, step: 100,    defMin: 8000,  defMax: 12000 },
+  { key: "brightness", label: "Brightness",   min: -1,    max: 1,     step: 0.01,   defMin: -0.05, defMax: 0.05  },
+  { key: "contrast",   label: "Contrast",     min: 0,     max: 2,     step: 0.01,   defMin: 0.95,  defMax: 1.10  },
+  { key: "saturation", label: "Saturation",   min: 0,     max: 3,     step: 0.01,   defMin: 0.95,  defMax: 1.15  },
+  { key: "gamma",      label: "Gamma",        min: 0.1,   max: 10,    step: 0.01,   defMin: 0.95,  defMax: 1.05  },
+  { key: "speed",      label: "Speed",        min: 0.5,   max: 2,     step: 0.001,  defMin: 1.03,  defMax: 1.04  },
+  { key: "zoom",       label: "Zoom",         min: 1.0,   max: 1.3,   step: 0.001,  defMin: 1.03,  defMax: 1.06  },
+  { key: "noise",      label: "Noise",        min: 0,     max: 100,   step: 1,      defMin: 5,     defMax: 15    },
+  { key: "vignette",   label: "Vignette",     min: 0,     max: 1.5,   step: 0.01,   defMin: 0.20,  defMax: 0.40  },
+  { key: "rotation",   label: "Rotation",     min: -5,    max: 5,     step: 0.1,    defMin: -0.5,  defMax: 0.5   },
+  { key: "cut_start",  label: "Cut Start",    min: 0,     max: 5,     step: 0.01,   defMin: 0.1,   defMax: 0.15  },
+  { key: "cut_end",    label: "Cut End",      min: 0,     max: 5,     step: 0.01,   defMin: 0.1,   defMax: 0.15  },
+];
+
+// =========================================================================
+// Grille de paramètres
+// =========================================================================
+function buildParamsGrid() {
+  const grid = document.getElementById("paramsGrid");
+  grid.innerHTML = "";
+  PARAMS.forEach(p => {
+    const card = document.createElement("div");
+    card.className = "param-card";
+    card.dataset.key = p.key;
+    card.innerHTML = `
+      <div class="param-header">
+        <input type="checkbox" id="cb_${p.key}" checked />
+        <label for="cb_${p.key}">${p.label}</label>
+      </div>
+      <div class="param-inputs">
+        <label>Min</label>
+        <input type="number" id="min_${p.key}" value="${p.defMin}" step="${p.step}" min="${p.min}" max="${p.max}" />
+        <label>Max</label>
+        <input type="number" id="max_${p.key}" value="${p.defMax}" step="${p.step}" min="${p.min}" max="${p.max}" />
+      </div>
+    `;
+    grid.appendChild(card);
+    const cb = card.querySelector(`#cb_${p.key}`);
+    cb.addEventListener("change", () => {
+      card.classList.toggle("disabled", !cb.checked);
+    });
+  });
+}
+
+// =========================================================================
+// Gestion des fichiers
+// =========================================================================
+const fileInput = document.getElementById("fileInput");
+const fileDisplay = document.getElementById("fileDisplay");
+
+fileInput.addEventListener("change", e => {
+  const files = Array.from(e.target.files || []);
+  if (files.length === 0) {
+    fileDisplay.textContent = "Aucun fichier sélectionné";
+    fileDisplay.classList.remove("selected");
+  } else {
+    const totalMB = (files.reduce((a, f) => a + f.size, 0) / 1024 / 1024).toFixed(1);
+    if (files.length === 1) {
+      fileDisplay.textContent = `${files[0].name} (${totalMB} MB)`;
+    } else {
+      fileDisplay.textContent = `${files.length} vidéos sélectionnées (${totalMB} MB total)`;
+    }
+    fileDisplay.classList.add("selected");
+  }
+  updatePreview();
+});
+
+function updatePreview() {
+  const nb = fileInput.files?.length || 0;
+  const copies = parseInt(document.getElementById("copies").value, 10) || 1;
+  const total = nb * copies;
+  document.getElementById("totalPreview").innerHTML =
+    `${nb} vidéo${nb > 1 ? "s" : ""} × ${copies} ${copies > 1 ? "copies" : "copie"} = <strong>${total} total</strong>`;
+}
+
+// =========================================================================
+// Status helpers
+// =========================================================================
+function setStatus(msg, type = "loading") {
+  const bar = document.getElementById("statusBar");
+  bar.className = `status-bar active ${type}`;
+  bar.innerHTML = type === "loading"
+    ? `<span class="spinner"></span>${msg}`
+    : msg;
+}
+
+// =========================================================================
+// Drive status au chargement
+// =========================================================================
+async function checkDriveStatus() {
+  try {
+    const res = await fetch("/api/health");
+    const data = await res.json();
+    const badge = document.getElementById("driveStatus");
+    if (data.drive_enabled) {
+      badge.textContent = "Drive : ON";
+      badge.className = "drive-status on";
+    } else {
+      badge.textContent = "Drive : OFF";
+      badge.className = "drive-status off";
+      document.getElementById("uploadDrive").checked = false;
+      document.getElementById("uploadDrive").disabled = true;
+    }
+  } catch (e) {
+    console.warn("Health check failed", e);
+  }
+}
+
+// =========================================================================
+// Generate
+// =========================================================================
+async function generate() {
+  const files = Array.from(fileInput.files || []);
+  if (files.length === 0) {
+    setStatus("Sélectionne d'abord une ou plusieurs vidéos.", "error");
+    return;
+  }
+
+  const copies = parseInt(document.getElementById("copies").value, 10) || 1;
+  const batchName = document.getElementById("batchName").value.trim();
+  const vaName = document.getElementById("vaName").value.trim();
+  const uploadDrive = document.getElementById("uploadDrive").checked;
+
+  const customRanges = {};
+  const enabledFilters = [];
+  PARAMS.forEach(p => {
+    const cb = document.getElementById(`cb_${p.key}`);
+    if (cb.checked) {
+      enabledFilters.push(p.key);
+      const minVal = parseFloat(document.getElementById(`min_${p.key}`).value);
+      const maxVal = parseFloat(document.getElementById(`max_${p.key}`).value);
+      customRanges[p.key] = [minVal, maxVal];
+    }
+  });
+
+  const formData = new FormData();
+  files.forEach(f => formData.append("files", f));
+  formData.append("batch_name", batchName);
+  formData.append("va_name", vaName);
+  formData.append("team", getCurrentTeam());
+  formData.append("copies_per_video", copies);
+  formData.append("concurrency", parseInt(document.getElementById("concurrency").value, 10) || 4);
+  formData.append("upload_to_drive", uploadDrive ? "true" : "false");
+  formData.append("device_choice", document.getElementById("deviceChoice").value || "mix_random");
+  formData.append("custom_ranges", JSON.stringify(customRanges));
+  formData.append("enabled_filters", JSON.stringify(enabledFilters));
+
+  const btn = document.getElementById("generateBtn");
+  btn.disabled = true;
+  const totalExpected = files.length * copies;
+  setStatus(`Traitement en cours... ${files.length} vidéo${files.length > 1 ? "s" : ""} × ${copies} = ${totalExpected} sorties. Patience (ça peut prendre plusieurs minutes).`);
+  document.getElementById("resultsBox").classList.remove("active");
+
+  // Démarre la barre de progression Drive si activé
+  let progressInterval = null;
+  if (uploadDrive) {
+    const wrap = document.getElementById("driveProgressWrap");
+    const bar = document.getElementById("driveProgressBar");
+    const txt = document.getElementById("driveProgressText");
+    wrap.style.display = "block";
+    bar.style.width = "0%";
+    bar.textContent = "";
+    txt.textContent = `0 / ${totalExpected}`;
+
+    progressInterval = setInterval(async () => {
+      try {
+        const r = await fetch("/api/progress-current");
+        const p = await r.json();
+        if (p.found && p.total > 0) {
+          const percent = p.percent || 0;
+          bar.style.width = percent + "%";
+          bar.textContent = percent > 10 ? percent.toFixed(1) + "%" : "";
+          txt.textContent = `${p.uploaded} / ${p.total}`;
+          if (p.done) {
+            bar.style.width = "100%";
+            bar.textContent = "100%";
+            clearInterval(progressInterval);
+            progressInterval = null;
+          }
+        }
+      } catch (e) {
+        // silent, continue polling
+      }
+    }, 1500);
+  }
+
+  try {
+    const res = await fetch("/api/process", { method: "POST", body: formData });
+    const data = await res.json();
+    if (progressInterval) {
+      clearInterval(progressInterval);
+      progressInterval = null;
+    }
+
+    if (!res.ok) {
+      setStatus(`Erreur : ${data.detail || "échec du traitement"}`, "error");
+      btn.disabled = false;
+      return;
+    }
+
+    renderResults(data);
+    let msg = `${data.succeeded} / ${data.total_requested} vidéos générées.`;
+    if (data.drive?.enabled) {
+      msg += ` ${data.drive.uploaded} uploadées sur Drive.`;
+    }
+    if (data.failed > 0) msg += ` ${data.failed} échec(s).`;
+    setStatus(msg, data.failed > 0 ? "error" : "success");
+  } catch (e) {
+    setStatus(`Erreur réseau : ${e.message}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// =========================================================================
+// Affichage des résultats
+// =========================================================================
+function renderResults(data) {
+  const box = document.getElementById("resultsBox");
+  const banner = document.getElementById("driveBanner");
+  const list = document.getElementById("resultsList");
+  banner.innerHTML = "";
+  list.innerHTML = "";
+
+  // Bandeau Drive
+  if (data.drive?.enabled && data.drive?.folder_url) {
+    banner.innerHTML = `
+      <div class="drive-link-banner">
+        <div>
+          <div style="font-weight: 500; margin-bottom: 4px;">📂 Dossier Drive créé</div>
+          <div class="name" style="font-family: monospace; font-size: 11px; color: var(--text-muted);">${data.batch_name}</div>
+        </div>
+        <a href="${data.drive.folder_url}" target="_blank" rel="noopener">Ouvrir sur Drive ↗</a>
+      </div>
+    `;
+  }
+
+  // Liste des vidéos (on limite l'affichage à 50 pour pas exploser le DOM)
+  const toShow = data.results.slice(0, 50);
+  toShow.forEach(r => {
+    const div = document.createElement("div");
+    div.className = "result-item" + (r.success ? "" : " fail");
+    if (r.success) {
+      const sizeMB = (r.size_bytes / 1024 / 1024).toFixed(2);
+      const driveLink = r.drive_url
+        ? ` · <a class="dl" href="${r.drive_url}" target="_blank">Drive ↗</a>`
+        : "";
+      div.innerHTML = `
+        <div>
+          <div>${r.source_file} — Copy #${r.copy_index} · ${sizeMB} MB</div>
+          <div class="name">${r.filename}</div>
+        </div>
+        <div>
+          <a class="dl" href="/api/download/${r.filename}" download>Télécharger ↓</a>${driveLink}
+        </div>
+      `;
+    } else {
+      div.innerHTML = `
+        <div>
+          <div>${r.source_file} — Copy #${r.copy_index} <span style="color:var(--danger)">(échec)</span></div>
+          <div class="name">${(r.error || "").slice(0, 120)}</div>
+        </div>
+      `;
+    }
+    list.appendChild(div);
+  });
+  if (data.results.length > 50) {
+    const more = document.createElement("div");
+    more.style.cssText = "text-align:center; padding:10px; color:var(--text-muted); font-size:12px;";
+    more.textContent = `... et ${data.results.length - 50} autres (voir le CSV sur Drive)`;
+    list.appendChild(more);
+  }
+  box.classList.add("active");
+}
+
+// Init
+buildParamsGrid();
+checkDriveStatus();
+updatePreview();
+loadVAs();
+
+// =========================================================================
+// Chargement de la liste VA depuis Discord (via /api/vas)
+// =========================================================================
+function getCurrentTeam() {
+  const teamSelect = document.getElementById("teamSelect");
+  return teamSelect ? teamSelect.value : "geelark";
+}
+
+async function onTeamChange() {
+  const team = getCurrentTeam();
+  localStorage.setItem("repurpose_team", team);
+  await loadVAs();
+}
+
+async function loadVAs() {
+  const select = document.getElementById("vaName");
+  const adminList = document.getElementById("vaAdminList");
+  try {
+    const team = getCurrentTeam();
+    const r = await fetch(`/api/vas?team=${encodeURIComponent(team)}`);
+    const data = await r.json();
+    const vas = data.vas || [];
+    const savedVa = localStorage.getItem(`repurpose_va_name_${team}`) || "";
+
+    // Dropdown VA (filtré par équipe)
+    if (select) {
+      select.innerHTML = '<option value="">-- Sélectionner VA --</option>';
+      vas.forEach(v => {
+        const name = typeof v === "string" ? v : v.name;
+        if (!name) return;
+        const email = typeof v === "object" ? v.email : null;
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = email ? `${name} — ${email}` : `${name} ⚠️ (pas d'email)`;
+        if (name === savedVa) opt.selected = true;
+        select.appendChild(opt);
+      });
+      if (data.last_sync) {
+        const d = new Date(data.last_sync);
+        select.title = `Dernière sync Discord : ${d.toLocaleString("fr-FR")}`;
+      }
+      if (!select._changeListenerAdded) {
+        select.addEventListener("change", () => {
+          const currentTeam = getCurrentTeam();
+          localStorage.setItem(`repurpose_va_name_${currentTeam}`, select.value);
+        });
+        select._changeListenerAdded = true;
+      }
+    }
+
+    // Panneau admin : TOUTES les équipes (pas filtré)
+    if (adminList) {
+      const rAll = await fetch("/api/vas");
+      const dataAll = await rAll.json();
+      const vasAll = dataAll.vas || [];
+      adminList.innerHTML = "";
+      if (vasAll.length === 0) {
+        adminList.innerHTML = '<p style="color: var(--muted); font-size: 13px;">Aucun VA dans le cache. Clique 🔄 pour sync.</p>';
+      } else {
+        vasAll.forEach(v => {
+          if (typeof v === "string") return;
+          const teamLabel = v.team || "—";
+          const teamBadge = v.team ? ` <span style="font-size: 10px; padding: 2px 6px; background: var(--accent-soft); color: var(--accent); border-radius: 4px;">${v.team}</span>` : "";
+          const row = document.createElement("div");
+          row.className = "va-row";
+          row.dataset.team = teamLabel;
+          row.style.cssText = "display: flex; gap: 8px; align-items: center; padding: 8px; background: var(--panel-2); border-radius: 6px;";
+          row.innerHTML = `
+            <span style="min-width: 160px; font-weight: 600; font-size: 13px;">${v.name}${teamBadge}</span>
+            <input type="email" placeholder="email@gmail.com" value="${v.email || ''}"
+                   data-discord-id="${v.discord_id}"
+                   style="flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-size: 13px;" />
+            <button class="btn" onclick="saveVAEmail(this)" style="padding: 6px 12px; font-size: 12px;">💾 Save</button>
+            <span class="save-status" style="font-size: 11px; color: var(--muted); min-width: 60px;"></span>
+          `;
+          adminList.appendChild(row);
+        });
+        // Ré-applique le filtre actuel après chargement
+        const activeBtn = document.querySelector(".va-filter-btn.active");
+        if (activeBtn) {
+          const currentFilter = activeBtn.textContent.trim().toLowerCase();
+          if (currentFilter !== "tous") filterAdminVAs(currentFilter, activeBtn);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Impossible de charger la liste VA:", e);
+  }
+}
+
+// Filtre les lignes VA du panneau admin par équipe
+function filterAdminVAs(team, btn) {
+  // Met à jour le bouton actif
+  document.querySelectorAll(".va-filter-btn").forEach(b => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  // Filtre les lignes
+  document.querySelectorAll(".va-row").forEach(row => {
+    if (team === "all") {
+      row.style.display = "flex";
+    } else {
+      row.style.display = row.dataset.team === team ? "flex" : "none";
+    }
+  });
+}
+
+// Restore team choice au boot
+(function restoreTeam() {
+  const savedTeam = localStorage.getItem("repurpose_team");
+  if (savedTeam) {
+    const teamSelect = document.getElementById("teamSelect");
+    if (teamSelect) teamSelect.value = savedTeam;
+  }
+})();
+
+async function saveVAEmail(btn) {
+  const row = btn.closest("div");
+  const input = row.querySelector("input[data-discord-id]");
+  const status = row.querySelector(".save-status");
+  const discordId = input.dataset.discordId;
+  const email = input.value.trim();
+
+  status.textContent = "...";
+  status.style.color = "var(--muted)";
+
+  try {
+    const fd = new FormData();
+    fd.append("discord_id", discordId);
+    fd.append("email", email);
+    const r = await fetch("/api/vas/email", { method: "POST", body: fd });
+    const data = await r.json();
+    if (r.ok && data.ok) {
+      status.textContent = "✓ saved";
+      status.style.color = "#22c55e";
+      setTimeout(() => { status.textContent = ""; }, 2000);
+    } else {
+      status.textContent = "✗ error";
+      status.style.color = "#ef4444";
+    }
+  } catch (e) {
+    status.textContent = "✗ error";
+    status.style.color = "#ef4444";
+  }
+}
+
+// Bouton resync manuel
+async function resyncVAs() {
+  const select = document.getElementById("vaName");
+  if (!select) return;
+  const oldTitle = select.title;
+  select.title = "Resync en cours...";
+  try {
+    const r = await fetch("/api/vas/sync", { method: "POST" });
+    const data = await r.json();
+    if (r.ok) {
+      await loadVAs();
+      const added = (data.added || []).length;
+      const removed = (data.removed || []).length;
+      alert(`Sync OK ! ${data.vas.length} VA trouvés.\n+${added} ajoutés, -${removed} supprimés`);
+    } else {
+      alert(`Sync échouée : ${data.detail || "erreur inconnue"}`);
+    }
+  } catch (e) {
+    alert(`Sync échouée : ${e}`);
+    select.title = oldTitle;
+  }
+}
+</script>
 </body>
 </html>
