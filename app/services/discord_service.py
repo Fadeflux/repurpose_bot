@@ -194,3 +194,57 @@ async def send_simple_message(content: str) -> bool:
                 return resp.status < 300
     except Exception:
         return False
+
+
+# ============================================================
+# Alertes admin (webhook séparé pour signaler les batches problématiques)
+# ============================================================
+
+def is_admin_webhook_enabled() -> bool:
+    """Retourne True si un webhook admin séparé est configuré."""
+    return bool(os.getenv("DISCORD_ADMIN_WEBHOOK_URL"))
+
+
+async def send_admin_alert(
+    title: str,
+    message: str,
+    level: str = "info",
+) -> bool:
+    """
+    Envoie une alerte admin via webhook dédié.
+    level : 'info' (bleu), 'warning' (orange), 'error' (rouge)
+    """
+    webhook_url = os.getenv("DISCORD_ADMIN_WEBHOOK_URL")
+    if not webhook_url:
+        logger.debug("Admin webhook non configuré, alerte ignorée")
+        return False
+
+    color_map = {
+        "info": 0x3498DB,      # bleu
+        "warning": 0xE67E22,   # orange
+        "error": 0xE74C3C,     # rouge
+    }
+    color = color_map.get(level, 0x95A5A6)
+
+    icon = "ℹ️" if level == "info" else "⚠️"
+    payload = {
+        "embeds": [
+            {
+                "title": f"{icon} {title}",
+                "description": message,
+                "color": color,
+            }
+        ]
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(webhook_url, json=payload, timeout=10) as resp:
+                if resp.status in (200, 204):
+                    logger.info(f"Admin alert envoyée : {title}")
+                    return True
+                logger.warning(f"Admin alert HTTP {resp.status}")
+                return False
+    except Exception as e:
+        logger.warning(f"Admin alert exception: {e}")
+        return False
