@@ -220,9 +220,9 @@ async def process_one(
         "-colorspace", "bt709",
         # Force framerate de sortie (en plus du filtre fps)
         "-r", str(settings.TARGET_FPS),
-        # Threads : 2 = limite pour éviter segfault sur Railway Hobby (2 GB RAM)
-        # quand plusieurs FFmpeg tournent en parallèle
-        "-threads", "2",
+        # Threads : 3 = bon équilibre entre vitesse et stabilité
+        # avec 6 process FFmpeg parallèles × 3 threads = 18 threads max sur 8 vCPU
+        "-threads", "3",
     ]
 
     cmd += video_cmd + [
