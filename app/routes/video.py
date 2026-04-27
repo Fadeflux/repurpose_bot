@@ -36,7 +36,7 @@ logger = get_logger("routes")
 # les uploads sans bloquer le pool default asyncio (qui est déjà pris par
 # d'autres IO bloquants).
 # ---------------------------------------------------------------------------
-_drive_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="drive-up")
+_drive_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="drive-up")
 
 
 # ---------------------------------------------------------------------------
@@ -535,7 +535,7 @@ async def process_endpoint(
     files: List[UploadFile] = File(..., description="Une ou plusieurs vidéos sources"),
     batch_name: str = Form("", description="Nom du batch (sous-dossier Drive)"),
     copies_per_video: int = Form(1, ge=1, description="Nombre de variantes par vidéo"),
-    concurrency: int = Form(4, ge=1, le=6, description="Processus ffmpeg parallèles"),
+    concurrency: int = Form(3, ge=1, le=4, description="Processus ffmpeg parallèles (max 4 pour Railway Hobby)"),
     upload_to_drive: bool = Form(True, description="Envoyer sur Google Drive"),
     device_choice: str = Form("mix_random", description="Type de device à simuler"),
     va_name: str = Form("", description="Nom du VA qui lance le batch"),
@@ -796,6 +796,39 @@ async def process_endpoint(
         )
     except Exception as e:
         logger.warning(f"Discord notif failed: {e}")
+
+    # Alerte admin si beaucoup d'erreurs ou retries (signaux d'un problème)
+    try:
+        from app.services.discord_service import send_admin_alert, is_admin_webhook_enabled
+        if is_admin_webhook_enabled():
+            total = len(success) + len(failed)
+            if total > 0:
+                error_rate = len(failed) / total
+                # Alerte si > 30% d'échecs
+                if error_rate > 0.3 and len(failed) > 2:
+                    await send_admin_alert(
+                        title=f"Batch avec beaucoup d'échecs : {batch_slug}",
+                        message=(
+                            f"**{len(failed)}/{total}** copies ont échoué ({int(error_rate*100)}%)\n"
+                            f"VA: `{va_name}`\n"
+                            f"Durée: {duration:.1f}s\n"
+                            f"Retries utilisés: {retries_used}"
+                        ),
+                        level="warning",
+                    )
+                # Alerte si beaucoup de retries (FFmpeg instable)
+                elif retries_used > 5:
+                    await send_admin_alert(
+                        title=f"Batch avec retries élevés : {batch_slug}",
+                        message=(
+                            f"**{retries_used} retries** utilisés sur {total} copies\n"
+                            f"VA: `{va_name}`\n"
+                            f"FFmpeg peut être instable, à surveiller."
+                        ),
+                        level="info",
+                    )
+    except Exception as e:
+        logger.warning(f"Admin alert failed: {e}")
 
     return JSONResponse(
         content={
