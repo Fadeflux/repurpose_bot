@@ -775,25 +775,51 @@ async def process_endpoint(
         except Exception as e:
             logger.warning(f"Erreur partage Drive avec VA: {e}")
 
-    # Notif Discord (non bloquante)
+    # Notif Discord (non bloquante) - utilise le bot en priorité, webhook en fallback
     duration = time.time() - batch_start_time
     try:
         # Récupère l'ID Discord du VA pour le mentionner
         from app.services.discord_va_sync import find_va_discord_id
         va_discord_id = find_va_discord_id(va_name) if va_name else ""
-        await send_batch_notification(
-            va_name=va_name,
-            va_discord_id=va_discord_id or "",
-            batch_name=batch_slug,
-            total_requested=len(files) * copies_per_video,
-            succeeded=len(success),
-            failed=len(failed),
-            drive_uploaded=drive_uploads_count,
-            retries_used=retries_used,
-            duration_seconds=duration,
-            device_choice=device_choice,
-            drive_folder_url=drive_folder_link,
-        )
+
+        # Essaie d'abord le bot Discord (plus propre, même bot que onboarding/spoof)
+        notif_sent = False
+        try:
+            from app.services.discord_bot import send_batch_notification_via_bot, is_bot_enabled
+            if is_bot_enabled():
+                notif_sent = await send_batch_notification_via_bot(
+                    team=team,
+                    va_name=va_name,
+                    va_discord_id=va_discord_id or "",
+                    batch_name=batch_slug,
+                    total_requested=len(files) * copies_per_video,
+                    succeeded=len(success),
+                    failed=len(failed),
+                    drive_uploaded=drive_uploads_count,
+                    retries_used=retries_used,
+                    duration_seconds=duration,
+                    device_choice=device_choice,
+                    drive_folder_url=drive_folder_link or "",
+                )
+        except Exception as e:
+            logger.warning(f"Bot notif failed, fallback webhook: {e}")
+
+        # Fallback webhook si le bot n'a pas pu envoyer
+        if not notif_sent:
+            await send_batch_notification(
+                va_name=va_name,
+                va_discord_id=va_discord_id or "",
+                batch_name=batch_slug,
+                total_requested=len(files) * copies_per_video,
+                succeeded=len(success),
+                failed=len(failed),
+                drive_uploaded=drive_uploads_count,
+                retries_used=retries_used,
+                duration_seconds=duration,
+                device_choice=device_choice,
+                drive_folder_url=drive_folder_link,
+                team=team,
+            )
     except Exception as e:
         logger.warning(f"Discord notif failed: {e}")
 
