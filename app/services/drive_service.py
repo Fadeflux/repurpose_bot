@@ -150,11 +150,14 @@ def upload_file(
     local_path: Path,
     folder_id: str,
     mime_type: str = "video/mp4",
+    max_retries: int = 3,
 ) -> Optional[Dict]:
     """
     Upload un fichier local vers Drive dans le dossier spécifié.
+    Retry automatique en cas d'erreur transitoire (incl. ResumableUploadError <HttpError 200>).
     Retourne un dict {id, name, webViewLink} ou None.
     """
+    import time
     client = get_drive_client()
     if not client:
         logger.error(f"upload_file: client Drive non initialisé pour {local_path.name}")
@@ -164,27 +167,59 @@ def upload_file(
         logger.error(f"upload_file: fichier inexistant {local_path}")
         return None
 
-    try:
-        _, _, _, _, MediaFileUpload, _ = _load_google_libs()
-        metadata = {
-            "name": local_path.name,
-            "parents": [folder_id],
-        }
-        file_size_mb = local_path.stat().st_size / 1024 / 1024
-        logger.info(f"upload_file: début upload {local_path.name} ({file_size_mb:.2f} MB) vers {folder_id}")
+    file_size_mb = local_path.stat().st_size / 1024 / 1024
 
-        media = MediaFileUpload(str(local_path), mimetype=mime_type, resumable=True)
-        result = client.files().create(
-            body=metadata,
-            media_body=media,
-            fields="id, name, webViewLink",
-            supportsAllDrives=True,
-        ).execute()
-        logger.info(f"upload_file: OK {local_path.name} → {result.get('id')}")
-        return result
-    except Exception as e:
-        logger.exception(f"upload_file: ÉCHEC {local_path.name} : {type(e).__name__}: {e}")
-        return None
+    for attempt in range(1, max_retries + 1):
+        try:
+            _, _, _, _, MediaFileUpload, _ = _load_google_libs()
+            metadata = {
+                "name": local_path.name,
+                "parents": [folder_id],
+            }
+            if attempt == 1:
+                logger.info(f"upload_file: début upload {local_path.name} ({file_size_mb:.2f} MB) vers {folder_id}")
+            else:
+                logger.info(f"upload_file: retry {attempt}/{max_retries} pour {local_path.name}")
+
+            media = MediaFileUpload(str(local_path), mimetype=mime_type, resumable=True)
+            result = client.files().create(
+                body=metadata,
+                media_body=media,
+                fields="id, name, webViewLink",
+                supportsAllDrives=True,
+            ).execute()
+            logger.info(f"upload_file: OK {local_path.name} → {result.get('id')}")
+            return result
+        except Exception as e:
+            err_str = str(e)
+            err_type = type(e).__name__
+            # Cas spécial : ResumableUploadError <HttpError 200 "OK">
+            # C'est un bug connu de la lib Google sur les uploads parallèles
+            # → on retry agressivement
+            is_transient = (
+                "200" in err_str  # HttpError 200 (faux positif)
+                or "ResumableUploadError" in err_type
+                or "ConnectionError" in err_type
+                or "TimeoutError" in err_type
+                or "Timeout" in err_str
+                or "503" in err_str  # Service unavailable
+                or "500" in err_str  # Server error
+                or "429" in err_str  # Rate limit
+            )
+
+            if is_transient and attempt < max_retries:
+                wait = 2 ** (attempt - 1)  # 1s, 2s, 4s
+                logger.warning(
+                    f"upload_file: erreur transitoire {err_type} pour {local_path.name}, "
+                    f"retry dans {wait}s ({attempt}/{max_retries})"
+                )
+                time.sleep(wait)
+                continue
+
+            logger.exception(f"upload_file: ÉCHEC DÉFINITIF {local_path.name} après {attempt} tentative(s) : {err_type}: {e}")
+            return None
+
+    return None
 
 
 def upload_csv(
