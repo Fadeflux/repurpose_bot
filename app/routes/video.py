@@ -537,7 +537,7 @@ async def process_endpoint(
     files: List[UploadFile] = File(..., description="Une ou plusieurs vidéos sources"),
     batch_name: str = Form("", description="Nom du batch (sous-dossier Drive)"),
     copies_per_video: int = Form(1, ge=1, description="Nombre de variantes par vidéo"),
-    concurrency: int = Form(3, ge=1, le=4, description="Processus ffmpeg parallèles (max 4 pour Railway Hobby)"),
+    concurrency: int = Form(8, ge=1, le=8, description="Processus ffmpeg parallèles (max 8 pour Railway Hobby)"),
     upload_to_drive: bool = Form(True, description="Envoyer sur Google Drive"),
     device_choice: str = Form("mix_random", description="Type de device à simuler"),
     va_name: str = Form("", description="Nom du VA qui lance le batch"),
