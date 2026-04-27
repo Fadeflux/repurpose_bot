@@ -353,6 +353,159 @@ def _build_bot() -> commands.Bot:
     return bot
 
 
+def _get_batch_channel_ids() -> dict:
+    """
+    Retourne les IDs de canaux de notifs batch par équipe.
+    Variables :
+      DISCORD_BATCH_CHANNEL_ID_GEELARK    : canal notifs équipe Geelark
+      DISCORD_BATCH_CHANNEL_ID_INSTAGRAM  : canal notifs équipe Instagram
+      DISCORD_BATCH_CHANNEL_ID            : fallback générique
+    """
+    result = {}
+    for team_key, env_name in [
+        ("geelark", "DISCORD_BATCH_CHANNEL_ID_GEELARK"),
+        ("instagram", "DISCORD_BATCH_CHANNEL_ID_INSTAGRAM"),
+        ("default", "DISCORD_BATCH_CHANNEL_ID"),
+    ]:
+        val = os.getenv(env_name, "").strip()
+        if val:
+            try:
+                result[team_key] = int(val)
+            except ValueError:
+                pass
+    return result
+
+
+async def send_batch_notification_via_bot(
+    *,
+    team: str,
+    va_name: str,
+    va_discord_id: str,
+    batch_name: str,
+    total_requested: int,
+    succeeded: int,
+    failed: int,
+    drive_uploaded: int,
+    retries_used: int,
+    duration_seconds: float,
+    device_choice: str,
+    drive_folder_url: str = "",
+) -> bool:
+    """
+    Envoie la notif de fin de batch via le bot Discord (au lieu d'un webhook).
+    Le canal est choisi selon l'équipe :
+      - team=geelark   → DISCORD_BATCH_CHANNEL_ID_GEELARK
+      - team=instagram → DISCORD_BATCH_CHANNEL_ID_INSTAGRAM
+      - autre/vide     → DISCORD_BATCH_CHANNEL_ID
+    """
+    global _bot
+    if _bot is None or not _bot.is_ready():
+        logger.warning("Bot Discord pas prêt, notif batch non envoyée")
+        return False
+
+    # Choisit le canal selon l'équipe
+    channel_ids = _get_batch_channel_ids()
+    team_key = (team or "").lower().strip()
+    channel_id = channel_ids.get(team_key) or channel_ids.get("default")
+
+    if not channel_id:
+        logger.warning(f"Aucun canal de notif batch configuré pour team={team}")
+        return False
+
+    channel = _bot.get_channel(channel_id)
+    if not channel:
+        logger.warning(f"Canal {channel_id} introuvable pour les notifs batch")
+        return False
+
+    # Format durée
+    mins = int(duration_seconds // 60)
+    secs = int(duration_seconds % 60)
+    duration_str = f"{mins}m {secs}s" if mins else f"{secs}s"
+
+    # Couleur + emoji selon résultat
+    if failed == 0:
+        color = 0x22c55e
+        status_emoji = "✅"
+        status_text = "Batch terminé"
+    elif succeeded > 0:
+        color = 0xf59e0b
+        status_emoji = "⚠️"
+        status_text = "Batch terminé (avec erreurs)"
+    else:
+        color = 0xef4444
+        status_emoji = "❌"
+        status_text = "Batch échoué"
+
+    # Champ device lisible
+    device_label = device_choice.replace("_", " ").title()
+    if device_choice == "smart_mix":
+        device_label = "🎯 Smart Mix"
+    elif device_choice == "mix_random":
+        device_label = "🎲 Mix iPhone + Android"
+
+    # Build embed
+    embed = discord.Embed(
+        title=f"{status_emoji} {status_text} : {batch_name}",
+        color=color,
+    )
+
+    if drive_folder_url:
+        embed.description = f"📂 [Ouvrir le dossier Drive]({drive_folder_url})"
+
+    embed.add_field(
+        name="📊 Résultat",
+        value=f"{succeeded}/{total_requested} copies",
+        inline=True,
+    )
+    if drive_uploaded > 0:
+        embed.add_field(
+            name="📁 Google Drive",
+            value=f"{drive_uploaded} uploads",
+            inline=True,
+        )
+    embed.add_field(
+        name="⏱️ Durée",
+        value=duration_str,
+        inline=True,
+    )
+
+    # VA mention
+    va_field_value = f"<@{va_discord_id}>" if va_discord_id else (va_name or "—")
+    embed.add_field(
+        name="👤 VA",
+        value=va_field_value,
+        inline=True,
+    )
+    embed.add_field(
+        name="📱 Device",
+        value=device_label,
+        inline=True,
+    )
+
+    if retries_used > 0:
+        embed.add_field(
+            name="🔄 Retries",
+            value=str(retries_used),
+            inline=True,
+        )
+
+    # Content avec mention pour push notif
+    content = f"<@{va_discord_id}>" if va_discord_id else None
+    allowed_mentions = discord.AllowedMentions(users=True) if va_discord_id else None
+
+    try:
+        await channel.send(
+            content=content,
+            embed=embed,
+            allowed_mentions=allowed_mentions,
+        )
+        logger.info(f"Notif batch envoyée via bot dans canal {channel.name} (team={team})")
+        return True
+    except Exception as e:
+        logger.exception(f"Erreur envoi notif batch via bot: {e}")
+        return False
+
+
 async def notify_va_drive_ready(discord_id: str, folder_url: str = "") -> bool:
     """
     Envoie un DM privé à un VA pour lui dire que son Drive est à jour.
