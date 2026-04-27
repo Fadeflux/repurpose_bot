@@ -57,6 +57,8 @@ def _update_progress(batch_id: str, total: int = None, uploaded_delta: int = 0, 
         _batch_progress[batch_id]["uploaded"] += uploaded_delta
     if done:
         _batch_progress[batch_id]["done"] = True
+        # Force 100% pour que le front cesse d'afficher 66.7% si un upload Drive a silently failed
+        _batch_progress[batch_id]["uploaded"] = _batch_progress[batch_id]["total"]
     # Nettoyage : garde seulement les N derniers
     if len(_batch_progress) > _MAX_TRACKED_BATCHES:
         oldest_keys = list(_batch_progress.keys())[:-_MAX_TRACKED_BATCHES]
