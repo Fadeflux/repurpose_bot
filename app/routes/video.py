@@ -36,7 +36,7 @@ logger = get_logger("routes")
 # les uploads sans bloquer le pool default asyncio (qui est déjà pris par
 # d'autres IO bloquants).
 # ---------------------------------------------------------------------------
-_drive_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="drive-up")
+_drive_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="drive-up")
 
 
 # ---------------------------------------------------------------------------
@@ -535,7 +535,7 @@ async def process_endpoint(
     files: List[UploadFile] = File(..., description="Une ou plusieurs vidéos sources"),
     batch_name: str = Form("", description="Nom du batch (sous-dossier Drive)"),
     copies_per_video: int = Form(1, ge=1, description="Nombre de variantes par vidéo"),
-    concurrency: int = Form(4, ge=1, le=6, description="Processus ffmpeg parallèles (max 6)"),
+    concurrency: int = Form(3, ge=1, le=4, description="Processus ffmpeg parallèles (max 4 sweet spot Railway)"),
     upload_to_drive: bool = Form(True, description="Envoyer sur Google Drive"),
     device_choice: str = Form("mix_random", description="Type de device à simuler"),
     va_name: str = Form("", description="Nom du VA qui lance le batch"),
