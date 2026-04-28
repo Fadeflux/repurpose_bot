@@ -57,6 +57,8 @@ def _update_progress(batch_id: str, total: int = None, uploaded_delta: int = 0, 
         _batch_progress[batch_id]["uploaded"] += uploaded_delta
     if done:
         _batch_progress[batch_id]["done"] = True
+        # Force 100% pour que le front cesse d'afficher 66.7% si un upload Drive a silently failed
+        _batch_progress[batch_id]["uploaded"] = _batch_progress[batch_id]["total"]
     # Nettoyage : garde seulement les N derniers
     if len(_batch_progress) > _MAX_TRACKED_BATCHES:
         oldest_keys = list(_batch_progress.keys())[:-_MAX_TRACKED_BATCHES]
@@ -535,7 +537,7 @@ async def process_endpoint(
     files: List[UploadFile] = File(..., description="Une ou plusieurs vidéos sources"),
     batch_name: str = Form("", description="Nom du batch (sous-dossier Drive)"),
     copies_per_video: int = Form(1, ge=1, description="Nombre de variantes par vidéo"),
-    concurrency: int = Form(3, ge=1, le=4, description="Processus ffmpeg parallèles (max 4 sweet spot Railway)"),
+    concurrency: int = Form(8, ge=1, le=8, description="Processus ffmpeg parallèles (max 8 pour Railway Hobby)"),
     upload_to_drive: bool = Form(True, description="Envoyer sur Google Drive"),
     device_choice: str = Form("mix_random", description="Type de device à simuler"),
     va_name: str = Form("", description="Nom du VA qui lance le batch"),
