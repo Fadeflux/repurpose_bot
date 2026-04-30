@@ -179,12 +179,31 @@ async def push_batch(
             saved_paths.append(p)
         logger.info(f"[{group_name}] {len(saved_paths)} fichiers sauvegardés en local")
 
-        # 3. (Plus besoin de démarrer les phones — l'upload de fichier fonctionne même
-        # sur des phones éteints, ce qui économise les minutes Geelark)
-        active_phones = phone_ids
+        # 3. Démarre les phones (obligatoire : "env not running" sinon)
+        logger.info(f"[{group_name}] Démarrage de {len(phone_ids)} phones...")
+        start_result = await geelark_service.start_phones(phone_ids)
+        active_phones = start_result["success_ids"]
+        if not active_phones:
+            details = "; ".join(
+                f"{f['id']}: code={f['code']} {f['msg']}"
+                for f in start_result["failures"][:3]
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Aucun phone démarré. Erreurs : {details}",
+            )
+
+        # On attend que les phones soient vraiment "Started" (status=0)
+        ready = await geelark_service.wait_phones_ready(active_phones, timeout_s=180)
+        if not ready:
+            raise HTTPException(
+                status_code=500, detail="Phones démarrés mais pas prêts après 3 min"
+            )
+        active_phones = ready
         logger.info(
-            f"[{group_name}] Push direct sur {len(active_phones)} phones "
-            f"(pas de démarrage requis)"
+            f"[{group_name}] {len(active_phones)} phones prêts "
+            f"({len(start_result['failures'])} échecs au start, "
+            f"{len(start_result['success_ids']) - len(active_phones)} jamais ready)"
         )
 
         # 4. Upload des vidéos vers le storage Geelark (parallèle, max 4 à la fois)
@@ -232,15 +251,21 @@ async def push_batch(
             f"[{group_name}] Push terminé : {len(success)} OK / {len(failed)} fail"
         )
 
-        # 7. Pas besoin d'éteindre les phones — ils n'étaient pas démarrés
+        # 7. Éteint les phones après push si demandé (pour économiser les minutes)
+        if auto_stop:
+            logger.info(f"[{group_name}] Extinction de {len(active_phones)} phones...")
+            await geelark_service.stop_phones(active_phones)
+
         return {
             "ok": True,
             "group": group_name,
             "mode": mode,
             "phones_total": len(phone_ids),
+            "phones_active": len(active_phones),
             "videos_uploaded": len(resource_urls),
             "push_success": len(success),
             "push_failed": len(failed),
+            "auto_stop": auto_stop,
         }
     except HTTPException:
         raise
