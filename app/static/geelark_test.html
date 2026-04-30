@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Test Geelark — Repurpose Bot</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#0f0f15; color:#e8e8ee; max-width:780px; margin:40px auto; padding:0 20px; }
+  h1 { color:#a78bfa; }
+  h2 { color:#7dd3fc; border-bottom:1px solid #2a2a35; padding-bottom:6px; margin-top:32px; }
+  .card { background:#1a1a25; border:1px solid #2a2a35; border-radius:10px; padding:20px; margin:16px 0; }
+  label { display:block; margin:10px 0 4px; font-size:13px; color:#b8b8c5; }
+  input, select, button { font-size:14px; padding:8px 10px; border-radius:6px; border:1px solid #3a3a4a; background:#0f0f15; color:#e8e8ee; box-sizing:border-box; }
+  input[type=text], select { width:100%; }
+  button { background:#7c3aed; border:none; cursor:pointer; padding:10px 18px; font-weight:600; margin-top:10px; }
+  button:hover { background:#6d28d9; }
+  button:disabled { opacity:0.5; cursor:not-allowed; }
+  pre { background:#0a0a10; border:1px solid #2a2a35; padding:12px; border-radius:6px; max-height:400px; overflow:auto; font-size:12px; white-space:pre-wrap; word-break:break-all; }
+  .ok { color:#4ade80; }
+  .err { color:#f87171; }
+  .muted { color:#6b6b78; font-size:12px; }
+</style>
+</head>
+<body>
+
+<h1>🧪 Test Geelark</h1>
+<p class="muted">Page de test pour valider l'intégration Geelark avant de la brancher au formulaire principal.</p>
+
+<!-- ====================== TEST 1 : Connexion ====================== -->
+<div class="card">
+  <h2>1. Test connexion</h2>
+  <p class="muted">Liste les groupes Geelark configurés.</p>
+  <button onclick="testConnection()">Tester la connexion</button>
+  <pre id="out-connection"></pre>
+</div>
+
+<!-- ====================== TEST 2 : Phones d'un groupe ====================== -->
+<div class="card">
+  <h2>2. Lister les phones d'un VA</h2>
+  <label>Groupe Geelark :</label>
+  <select id="group-select">
+    <option value="">— Charge d'abord les groupes —</option>
+  </select>
+  <button onclick="loadGroups()">🔄 Recharger les groupes</button>
+  <button onclick="listPhones()">Lister les phones</button>
+  <pre id="out-phones"></pre>
+</div>
+
+<!-- ====================== TEST 3 : Push test sur 1 phone ====================== -->
+<div class="card">
+  <h2>3. Push 1 vidéo sur 1 phone</h2>
+  <p class="muted">⚠️ Ça démarre le phone (consomme des minutes Geelark). Choisis un phone test.</p>
+  <label>Phone ID :</label>
+  <input type="text" id="phone-id" placeholder="Copie un ID depuis le test 2">
+  <label>Vidéo MP4 :</label>
+  <input type="file" id="push-file" accept="video/mp4">
+  <label><input type="checkbox" id="auto-stop-test" checked> Éteindre le phone après upload</label>
+  <button onclick="pushTest()" id="btn-push-test">Push sur ce phone</button>
+  <pre id="out-push-test"></pre>
+</div>
+
+<!-- ====================== TEST 4 : Push batch sur tout un VA ====================== -->
+<div class="card">
+  <h2>4. Push batch sur tout un VA</h2>
+  <p class="muted">⚠️ Démarre TOUS les phones du VA en parallèle. Vérifie ton solde Geelark avant.</p>
+  <label>Groupe Geelark :</label>
+  <select id="batch-group"></select>
+  <label>Mode de distribution :</label>
+  <select id="batch-mode">
+    <option value="round_robin">round_robin (1 vidéo par phone, en boucle)</option>
+    <option value="random">random (vidéos aléatoires sur les phones)</option>
+    <option value="all_to_all">all_to_all (toutes les vidéos sur tous les phones)</option>
+  </select>
+  <label>Vidéos MP4 :</label>
+  <input type="file" id="batch-files" accept="video/mp4" multiple>
+  <label><input type="checkbox" id="auto-stop-batch" checked> Éteindre les phones après upload</label>
+  <button onclick="pushBatch()" id="btn-push-batch">🚀 Push le batch</button>
+  <pre id="out-batch"></pre>
+</div>
+
+<script>
+const BASE = "/api/geelark";
+
+function show(id, data, isErr = false) {
+  const el = document.getElementById(id);
+  el.className = isErr ? "err" : "ok";
+  el.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+}
+
+async function fetchJson(url, options = {}) {
+  const resp = await fetch(url, options);
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+  return data;
+}
+
+async function testConnection() {
+  show("out-connection", "Chargement...");
+  try {
+    const data = await fetchJson(`${BASE}/test`);
+    show("out-connection", data);
+    populateGroups(data.groups || []);
+  } catch (e) {
+    show("out-connection", `❌ ${e.message}`, true);
+  }
+}
+
+function populateGroups(groups) {
+  for (const sel of [document.getElementById("group-select"), document.getElementById("batch-group")]) {
+    sel.innerHTML = "";
+    if (!groups.length) {
+      sel.innerHTML = '<option value="">Aucun groupe</option>';
+      continue;
+    }
+    sel.innerHTML = '<option value="">— Choisir —</option>' +
+      groups.map(g => `<option value="${g}">${g}</option>`).join("");
+  }
+}
+
+async function loadGroups() {
+  await testConnection();
+}
+
+async function listPhones() {
+  const grp = document.getElementById("group-select").value;
+  if (!grp) { show("out-phones", "Sélectionne un groupe d'abord", true); return; }
+  show("out-phones", "Chargement...");
+  try {
+    const data = await fetchJson(`${BASE}/phones?group=${encodeURIComponent(grp)}`);
+    show("out-phones", data);
+  } catch (e) {
+    show("out-phones", `❌ ${e.message}`, true);
+  }
+}
+
+async function pushTest() {
+  const phoneId = document.getElementById("phone-id").value.trim();
+  const file = document.getElementById("push-file").files[0];
+  const autoStop = document.getElementById("auto-stop-test").checked;
+  if (!phoneId) { show("out-push-test", "Rentre un phone ID", true); return; }
+  if (!file)    { show("out-push-test", "Choisis une vidéo", true); return; }
+
+  const btn = document.getElementById("btn-push-test");
+  btn.disabled = true;
+  show("out-push-test", "⏳ Upload en cours (peut prendre 1-2 min : démarrage phone + upload)...");
+
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("phone_id", phoneId);
+  fd.append("auto_start", "true");
+  fd.append("auto_stop", autoStop ? "true" : "false");
+
+  try {
+    const data = await fetchJson(`${BASE}/push-test`, { method: "POST", body: fd });
+    show("out-push-test", data);
+  } catch (e) {
+    show("out-push-test", `❌ ${e.message}`, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function pushBatch() {
+  const grp = document.getElementById("batch-group").value;
+  const mode = document.getElementById("batch-mode").value;
+  const files = document.getElementById("batch-files").files;
+  const autoStop = document.getElementById("auto-stop-batch").checked;
+  if (!grp) { show("out-batch", "Sélectionne un groupe", true); return; }
+  if (!files.length) { show("out-batch", "Choisis au moins 1 vidéo", true); return; }
+
+  const btn = document.getElementById("btn-push-batch");
+  btn.disabled = true;
+  show("out-batch", `⏳ Démarrage des phones + upload de ${files.length} vidéos...\nÇa peut prendre 3-5 min.`);
+
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f);
+  fd.append("group_name", grp);
+  fd.append("mode", mode);
+  fd.append("auto_stop", autoStop ? "true" : "false");
+
+  try {
+    const data = await fetchJson(`${BASE}/push-batch`, { method: "POST", body: fd });
+    show("out-batch", data);
+  } catch (e) {
+    show("out-batch", `❌ ${e.message}`, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Auto-load groups on page load
+testConnection();
+</script>
+</body>
+</html>
