@@ -225,16 +225,23 @@ async def _get_upload_url(file_type: str = "mp4") -> Dict[str, str]:
     return await _post("/upload/getUrl", {"fileType": file_type})
 
 
-async def _put_file_to_url(upload_url: str, file_path: str) -> bool:
+async def _put_file_to_url(
+    upload_url: str, file_path: str, content_type: str = "application/octet-stream"
+) -> bool:
     """Étape 2 : PUT le fichier sur l'uploadUrl signée."""
     try:
         with open(file_path, "rb") as f:
             data = f.read()
+        headers = {"Content-Type": content_type}
         async with aiohttp.ClientSession() as session:
-            async with session.put(upload_url, data=data, timeout=300) as resp:
+            async with session.put(
+                upload_url, data=data, headers=headers, timeout=300
+            ) as resp:
                 if resp.status not in (200, 204):
                     txt = await resp.text()
-                    logger.warning(f"PUT upload failed {resp.status}: {txt[:200]}")
+                    logger.warning(
+                        f"PUT upload failed {resp.status} (ct={content_type}): {txt[:300]}"
+                    )
                     return False
         return True
     except Exception as e:
@@ -247,6 +254,23 @@ async def upload_temp_file(file_path: str, file_type: str = "mp4") -> Optional[s
     Upload un fichier vers le storage temporaire Geelark (3 jours de validité).
     Retourne le resourceUrl (à utiliser ensuite pour pousser sur les phones).
     """
+    # Map fileType -> MIME type pour respecter le Content-Type de la signature S3
+    mime_map = {
+        "mp4": "video/mp4",
+        "webm": "video/webm",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "gif": "image/gif",
+        "bmp": "image/bmp",
+        "webp": "image/webp",
+        "heic": "image/heic",
+        "xml": "application/xml",
+        "apk": "application/vnd.android.package-archive",
+        "xapk": "application/vnd.android.package-archive",
+    }
+    content_type = mime_map.get(file_type.lower(), "application/octet-stream")
+
     try:
         urls = await _get_upload_url(file_type=file_type)
         upload_url = urls.get("uploadUrl")
@@ -255,7 +279,7 @@ async def upload_temp_file(file_path: str, file_type: str = "mp4") -> Optional[s
             logger.error(f"upload/getUrl response sans uploadUrl/resourceUrl : {urls}")
             return None
 
-        ok = await _put_file_to_url(upload_url, file_path)
+        ok = await _put_file_to_url(upload_url, file_path, content_type=content_type)
         if not ok:
             return None
         logger.info(f"Fichier upload OK sur Geelark : {file_path} → {resource_url}")
