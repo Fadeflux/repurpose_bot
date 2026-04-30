@@ -257,24 +257,11 @@ async def upload_temp_file(file_path: str, file_type: str = "mp4") -> Optional[s
     """
     Upload un fichier vers le storage temporaire Geelark (3 jours de validité).
     Retourne le resourceUrl (à utiliser ensuite pour pousser sur les phones).
-    """
-    # Map fileType -> MIME type pour respecter le Content-Type de la signature S3
-    mime_map = {
-        "mp4": "video/mp4",
-        "webm": "video/webm",
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "png": "image/png",
-        "gif": "image/gif",
-        "bmp": "image/bmp",
-        "webp": "image/webp",
-        "heic": "image/heic",
-        "xml": "application/xml",
-        "apk": "application/vnd.android.package-archive",
-        "xapk": "application/vnd.android.package-archive",
-    }
-    content_type = mime_map.get(file_type.lower(), "application/octet-stream")
 
+    Note : le storage est de l'Aliyun OSS. Les URLs signées par Geelark côté
+    /upload/getUrl ne contiennent pas de Content-Type forcé, donc on doit
+    envoyer application/octet-stream pour ne pas casser la signature.
+    """
     try:
         urls = await _get_upload_url(file_type=file_type)
         upload_url = urls.get("uploadUrl")
@@ -283,7 +270,10 @@ async def upload_temp_file(file_path: str, file_type: str = "mp4") -> Optional[s
             logger.error(f"upload/getUrl response sans uploadUrl/resourceUrl : {urls}")
             return None
 
-        ok = await _put_file_to_url(upload_url, file_path, content_type=content_type)
+        # Aliyun OSS : on envoie en octet-stream pour matcher la signature par défaut
+        ok = await _put_file_to_url(
+            upload_url, file_path, content_type="application/octet-stream"
+        )
         if not ok:
             return None
         logger.info(f"Fichier upload OK sur Geelark : {file_path} → {resource_url}")
