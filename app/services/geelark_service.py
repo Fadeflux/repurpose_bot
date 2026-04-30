@@ -239,9 +239,13 @@ async def _put_file_to_url(
             ) as resp:
                 if resp.status not in (200, 204):
                     txt = await resp.text()
+                    # Log COMPLET du body XML pour diagnostiquer (S3/OSS error codes)
                     logger.warning(
-                        f"PUT upload failed {resp.status} (ct={content_type}): {txt[:300]}"
+                        f"PUT upload failed status={resp.status} ct={content_type} "
+                        f"size={len(data)} url_host={upload_url[:80]}..."
                     )
+                    logger.warning(f"PUT response body FULL: {txt}")
+                    logger.warning(f"PUT response headers: {dict(resp.headers)}")
                     return False
         return True
     except Exception as e:
