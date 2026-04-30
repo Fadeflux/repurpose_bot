@@ -226,20 +226,30 @@ async def _get_upload_url(file_type: str = "mp4") -> Dict[str, str]:
 
 
 async def _put_file_to_url(
-    upload_url: str, file_path: str, content_type: str = "application/octet-stream"
+    upload_url: str, file_path: str, content_type: Optional[str] = None
 ) -> bool:
-    """Étape 2 : PUT le fichier sur l'uploadUrl signée."""
+    """
+    Étape 2 : PUT le fichier sur l'uploadUrl signée.
+    Si content_type=None, on n'envoie PAS de header Content-Type — Aliyun OSS
+    accepte ça quand l'URL signée n'a pas été créée avec un Content-Type forcé.
+    """
     try:
         with open(file_path, "rb") as f:
             data = f.read()
-        headers = {"Content-Type": content_type}
+        headers = {}
+        if content_type:
+            headers["Content-Type"] = content_type
         async with aiohttp.ClientSession() as session:
+            # skip_auto_headers pour empêcher aiohttp d'ajouter Content-Type tout seul
             async with session.put(
-                upload_url, data=data, headers=headers, timeout=300
+                upload_url,
+                data=data,
+                headers=headers,
+                timeout=300,
+                skip_auto_headers=["Content-Type"] if not content_type else [],
             ) as resp:
                 if resp.status not in (200, 204):
                     txt = await resp.text()
-                    # Log COMPLET du body XML pour diagnostiquer (S3/OSS error codes)
                     logger.warning(
                         f"PUT upload failed status={resp.status} ct={content_type} "
                         f"size={len(data)} url_host={upload_url[:80]}..."
@@ -270,10 +280,8 @@ async def upload_temp_file(file_path: str, file_type: str = "mp4") -> Optional[s
             logger.error(f"upload/getUrl response sans uploadUrl/resourceUrl : {urls}")
             return None
 
-        # Aliyun OSS : on envoie en octet-stream pour matcher la signature par défaut
-        ok = await _put_file_to_url(
-            upload_url, file_path, content_type="application/octet-stream"
-        )
+        # Aliyun OSS : on n'envoie pas de Content-Type, l'URL signée gère ça toute seule
+        ok = await _put_file_to_url(upload_url, file_path, content_type=None)
         if not ok:
             return None
         logger.info(f"Fichier upload OK sur Geelark : {file_path} → {resource_url}")
