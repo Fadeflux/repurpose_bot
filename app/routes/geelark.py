@@ -179,18 +179,31 @@ async def push_batch(
             saved_paths.append(p)
         logger.info(f"[{group_name}] {len(saved_paths)} fichiers sauvegardés en local")
 
-        # 3. Démarre les phones
+        # 3. Démarre les phones en un seul batch
         logger.info(f"[{group_name}] Démarrage de {len(phone_ids)} phones...")
-        await geelark_service.start_phones(phone_ids)
+        start_result = await geelark_service.start_phones(phone_ids)
+        if not start_result["success_ids"]:
+            details = "; ".join(
+                f"{f['id']}: code={f['code']} {f['msg']}"
+                for f in start_result["failures"][:3]
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Aucun phone démarré. Erreurs : {details}",
+            )
+
         ready_phones = await geelark_service.wait_phones_ready(
-            phone_ids, timeout_s=180
+            start_result["success_ids"], timeout_s=180
         )
         if not ready_phones:
             raise HTTPException(
                 status_code=500,
-                detail="Aucun phone démarré après 3 min, abort",
+                detail="Phones démarrés mais pas prêts après 3 min",
             )
-        logger.info(f"[{group_name}] {len(ready_phones)}/{len(phone_ids)} phones prêts")
+        logger.info(
+            f"[{group_name}] {len(ready_phones)}/{len(phone_ids)} phones prêts "
+            f"({len(start_result['failures'])} échecs au start)"
+        )
 
         # 4. Upload des vidéos vers le storage Geelark (parallèle, max 4 à la fois)
         upload_sem = asyncio.Semaphore(4)
