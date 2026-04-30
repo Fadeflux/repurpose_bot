@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.routes.video import router as video_router
+from app.routes.geelark import router as geelark_router
 from app.services.auth import (
     check_password,
     is_authenticated,
@@ -34,6 +35,7 @@ app.add_middleware(
 )
 
 app.include_router(video_router)
+app.include_router(geelark_router)
 
 # Sert les fichiers statiques (CSS, JS, images si besoin)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
