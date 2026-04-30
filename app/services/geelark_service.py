@@ -149,40 +149,95 @@ async def list_groups() -> List[str]:
     return sorted(groups)
 
 
+async def start_phones(phone_ids: List[str]) -> Dict[str, Any]:
+    """
+    Démarre un ou plusieurs phones en un seul appel batch (max 200 par appel).
+    Retourne un dict {success_ids: [...], failures: [{id, code, msg}, ...]}.
+    """
+    if not phone_ids:
+        return {"success_ids": [], "failures": []}
+
+    success_ids: List[str] = []
+    failures: List[Dict[str, Any]] = []
+
+    # L'API supporte 200 IDs max par appel, on découpe au cas où
+    for i in range(0, len(phone_ids), 200):
+        chunk = phone_ids[i : i + 200]
+        try:
+            data = await _post("/phone/start", {"ids": chunk})
+            for s in data.get("successDetails") or []:
+                if s.get("id"):
+                    success_ids.append(s["id"])
+            for f in data.get("failDetails") or []:
+                failures.append(
+                    {
+                        "id": f.get("id"),
+                        "code": f.get("code"),
+                        "msg": f.get("msg"),
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"start_phones chunk failed: {e}")
+            for pid in chunk:
+                failures.append({"id": pid, "code": -1, "msg": str(e)})
+
+    if failures:
+        # Log les échecs avec leur raison pour qu'on voie pourquoi
+        for f in failures[:5]:  # limite à 5 pour éviter de spammer
+            logger.warning(
+                f"start_phone failed id={f['id']} code={f['code']} msg={f['msg']}"
+            )
+        if len(failures) > 5:
+            logger.warning(f"... et {len(failures) - 5} autres échecs")
+
+    logger.info(
+        f"start_phones : {len(success_ids)} OK, {len(failures)} fail "
+        f"(sur {len(phone_ids)} demandés)"
+    )
+    return {"success_ids": success_ids, "failures": failures}
+
+
+async def stop_phones(phone_ids: List[str]) -> Dict[str, Any]:
+    """Éteint plusieurs phones en batch. Retourne {success_ids, failures}."""
+    if not phone_ids:
+        return {"success_ids": [], "failures": []}
+
+    success_ids: List[str] = []
+    failures: List[Dict[str, Any]] = []
+
+    for i in range(0, len(phone_ids), 200):
+        chunk = phone_ids[i : i + 200]
+        try:
+            data = await _post("/phone/stop", {"ids": chunk})
+            for s in data.get("successDetails") or []:
+                if s.get("id"):
+                    success_ids.append(s["id"])
+            for f in data.get("failDetails") or []:
+                failures.append(
+                    {
+                        "id": f.get("id"),
+                        "code": f.get("code"),
+                        "msg": f.get("msg"),
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"stop_phones chunk failed: {e}")
+
+    logger.info(f"stop_phones : {len(success_ids)} OK, {len(failures)} fail")
+    return {"success_ids": success_ids, "failures": failures}
+
+
+# Versions single-phone (wrappers) — gardées pour compat avec l'endpoint push-test
 async def start_phone(phone_id: str) -> bool:
-    """Démarre un phone. Idempotent : ne fait rien s'il est déjà démarré."""
-    try:
-        await _post("/phone/start", {"ids": [phone_id]})
-        return True
-    except Exception as e:
-        logger.warning(f"start_phone {phone_id} failed: {e}")
-        return False
+    """Démarre un phone unique. True si succès."""
+    res = await start_phones([phone_id])
+    return phone_id in res["success_ids"]
 
 
 async def stop_phone(phone_id: str) -> bool:
-    """Éteint un phone."""
-    try:
-        await _post("/phone/stop", {"ids": [phone_id]})
-        return True
-    except Exception as e:
-        logger.warning(f"stop_phone {phone_id} failed: {e}")
-        return False
-
-
-async def start_phones(phone_ids: List[str]) -> int:
-    """Démarre plusieurs phones en parallèle. Retourne le nb de succès."""
-    results = await asyncio.gather(
-        *[start_phone(pid) for pid in phone_ids], return_exceptions=True
-    )
-    return sum(1 for r in results if r is True)
-
-
-async def stop_phones(phone_ids: List[str]) -> int:
-    """Éteint plusieurs phones en parallèle. Retourne le nb de succès."""
-    results = await asyncio.gather(
-        *[stop_phone(pid) for pid in phone_ids], return_exceptions=True
-    )
-    return sum(1 for r in results if r is True)
+    """Éteint un phone unique. True si succès."""
+    res = await stop_phones([phone_id])
+    return phone_id in res["success_ids"]
 
 
 async def wait_phones_ready(
