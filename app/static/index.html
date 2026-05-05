@@ -242,7 +242,7 @@
   .file-display {
     flex: 1;
     background: var(--panel-2);
-    border: 1px solid var(--border);
+    border: 1px dashed var(--border);
     color: var(--muted-2);
     padding: 10px 14px;
     border-radius: 8px;
@@ -250,8 +250,17 @@
     min-height: 38px;
     display: flex;
     align-items: center;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease, color .15s ease;
   }
-  .file-display.has-files { color: var(--text); border-color: var(--accent); }
+  .file-display:hover { border-color: var(--accent); color: var(--text); }
+  .file-display.has-files { color: var(--text); border-color: var(--accent); border-style: solid; }
+  .file-display.dropping {
+    border-color: var(--accent);
+    background: rgba(124, 58, 237, 0.08);
+    color: var(--text);
+    border-style: solid;
+  }
 
   input, select {
     background: var(--panel-2);
@@ -592,7 +601,7 @@
     <div class="card-title" data-i18n="upload_config">📤 Upload & Configuration</div>
     <div class="upload-row">
       <label data-i18n="video_files">Fichiers vidéo</label>
-      <div class="file-display" id="fileDisplay" data-i18n="no_file">Aucun fichier sélectionné</div>
+      <div class="file-display" id="fileDisplay" data-i18n="no_file" onclick="document.getElementById('fileInput').click()">Aucun fichier sélectionné — clique ou glisse tes vidéos ici</div>
       <input type="file" id="fileInput" accept="video/*" multiple style="display:none" />
       <button class="btn" onclick="document.getElementById('fileInput').click()" data-i18n="browse">Browse</button>
     </div>
@@ -766,7 +775,7 @@ const TRANSLATIONS = {
     subtitle_text: "Décoche une case pour désactiver un filtre. Valeurs randomisées entre Min et Max.",
     upload_config: "📤 Upload & Configuration",
     video_files: "Fichiers vidéo",
-    no_file: "Aucun fichier sélectionné",
+    no_file: "Aucun fichier sélectionné — clique ou glisse tes vidéos ici",
     file_count: (n) => `${n} fichier${n > 1 ? 's' : ''} sélectionné${n > 1 ? 's' : ''}`,
     browse: "Parcourir",
     team: "Équipe",
@@ -815,7 +824,7 @@ const TRANSLATIONS = {
     subtitle_text: "Uncheck a box to disable a filter. Values randomized between Min and Max.",
     upload_config: "📤 Upload & Configuration",
     video_files: "Video files",
-    no_file: "No file selected",
+    no_file: "No file selected — click or drop your videos here",
     file_count: (n) => `${n} file${n > 1 ? 's' : ''} selected`,
     browse: "Browse",
     team: "Team",
@@ -981,6 +990,42 @@ fileInput.addEventListener("change", e => {
   }
   updatePreview();
 });
+
+// ---- Drag & drop sur la file-display + sur la page entière ----
+function setDroppedFiles(fileList) {
+  const videos = Array.from(fileList).filter(f =>
+    f.type.startsWith("video/") || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(f.name)
+  );
+  if (!videos.length) return;
+  // On reconstruit un DataTransfer pour pousser les fichiers dans l'input natif
+  const dt = new DataTransfer();
+  videos.forEach(f => dt.items.add(f));
+  fileInput.files = dt.files;
+  // Trigger l'event change pour que la logique existante prenne le relais
+  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+["dragenter", "dragover"].forEach(ev =>
+  fileDisplay.addEventListener(ev, e => {
+    e.preventDefault();
+    e.stopPropagation();
+    fileDisplay.classList.add("dropping");
+  })
+);
+["dragleave", "drop"].forEach(ev =>
+  fileDisplay.addEventListener(ev, e => {
+    e.preventDefault();
+    e.stopPropagation();
+    fileDisplay.classList.remove("dropping");
+  })
+);
+fileDisplay.addEventListener("drop", e => {
+  if (e.dataTransfer?.files?.length) setDroppedFiles(e.dataTransfer.files);
+});
+
+// Empêche le navigateur d'ouvrir une vidéo lâchée à côté de la zone
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => e.preventDefault());
 
 function updatePreview() {
   const nb = fileInput.files?.length || 0;
