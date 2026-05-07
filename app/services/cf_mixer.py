@@ -76,9 +76,12 @@ def _get_video_duration(path: str) -> float:
 
 
 def _font_path() -> str:
+    """Police principale pour le texte des captions. Priorité : Inter Bold (Insta-look)."""
     candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/inter/Inter-Bold.ttf",
+        "/usr/share/fonts/opentype/inter/Inter-Bold.otf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
         "/Library/Fonts/Arial Bold.ttf",
         "C:/Windows/Fonts/arialbd.ttf",
@@ -87,6 +90,114 @@ def _font_path() -> str:
         if os.path.exists(c):
             return c
     return ""
+
+
+def _font_family_name() -> str:
+    """Nom de famille pour ASS (libass utilise fontconfig pour résoudre)."""
+    # Inter est la meilleure police Insta-like en libre
+    if os.path.exists("/usr/share/fonts/truetype/inter/Inter-Bold.ttf") or \
+       os.path.exists("/usr/share/fonts/opentype/inter/Inter-Bold.otf"):
+        return "Inter"
+    if os.path.exists("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"):
+        return "Liberation Sans"
+    return "DejaVu Sans"
+
+
+def _ass_escape(text: str) -> str:
+    """Escape caractères spéciaux ASS. Garde les emojis intacts."""
+    text = text.replace("\\", "\\\\")
+    text = text.replace("{", "\\{").replace("}", "\\}")
+    # Newlines en \N (ASS hard break)
+    text = text.replace("\r\n", "\\N").replace("\n", "\\N").replace("\r", "\\N")
+    return text
+
+
+def _build_ass_file(
+    caption: str,
+    font_size: int,
+    margin_v: int,
+    align_code: int = 5,
+    duration_s: float = 9999.0,
+) -> Path:
+    """
+    Crée un fichier .ass temporaire pour le subtitles filter de FFmpeg.
+
+    Style Insta :
+    - Texte blanc, contour noir fin
+    - Background semi-transparent (BorderStyle=4 = box derrière le texte)
+    - Police Inter (Insta-like) si dispo
+    - Emojis colorés via fontconfig fallback Noto Color Emoji
+    """
+    family = _font_family_name()
+    # ASS colors are &HAABBGGRR (alpha + bgr)
+    primary = "&H00FFFFFF"           # blanc opaque
+    outline = "&H00000000"           # noir opaque
+    back    = "&H80000000"           # noir 50% (alpha=80 hex = 128/255)
+
+    # Aligns ASS (numpad layout) :
+    # 7=top-left  8=top-center  9=top-right
+    # 4=mid-left  5=mid-center  6=mid-right
+    # 1=bot-left  2=bot-center  3=bot-right
+
+    end_ts = max(1.0, duration_s)
+    # Format ASS time : H:MM:SS.cc
+    def fmt_t(s: float) -> str:
+        h = int(s // 3600)
+        m = int((s % 3600) // 60)
+        sec = s - h * 3600 - m * 60
+        return f"{h}:{m:02d}:{sec:05.2f}"
+
+    end_str = fmt_t(end_ts)
+
+    text_ass = _ass_escape(caption or "")
+
+    ass_content = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {TARGET_W}
+PlayResY: {TARGET_H}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Insta,{family},{font_size},{primary},&H000000FF,{outline},{back},1,0,0,0,100,100,0,0,3,3,0,{align_code},80,80,{margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,{end_str},Insta,,0,0,0,,{text_ass}
+"""
+    # Stocke dans /tmp avec nom unique
+    ass_path = OUTPUT_DIR / f"_caption_{random.randint(100000, 999999)}.ass"
+    ass_path.write_text(ass_content, encoding="utf-8")
+    return ass_path
+
+
+def _ass_align_for(align: str) -> int:
+    """Convert align string en code numpad ASS."""
+    a = (align or "center").lower()
+    if a == "top":
+        return 8        # haut centré
+    if a == "tiktok":
+        return 2        # bas centré (placement TikTok)
+    if a == "bottom":
+        return 2        # bas centré
+    return 5            # milieu centré (center default)
+
+
+def _margin_v_for_align(align: str, position_pct: Optional[float] = None) -> int:
+    """Compute MarginV (pixels depuis le haut/bas selon align)."""
+    if position_pct is not None:
+        # Si on a un % custom, on convertit. ASS MarginV est en px depuis bas (pour align=2)
+        # ou depuis haut (pour align=8). On reste simple en center et on règle via MarginV.
+        return int(TARGET_H * (1.0 - max(0.0, min(100.0, position_pct)) / 100.0))
+    a = (align or "center").lower()
+    if a == "top":
+        return int(TARGET_H * 0.10)
+    if a == "tiktok":
+        return int(TARGET_H * 0.18)  # un peu plus haut que le bas pur
+    if a == "bottom":
+        return int(TARGET_H * 0.06)
+    return 0  # center : MarginV ignoré pour align=5
 
 
 def _build_ffmpeg_cmd(
@@ -101,42 +212,37 @@ def _build_ffmpeg_cmd(
     font_size_px: Optional[int] = None,    # overrides size_label if set
     max_duration: Optional[float] = None,  # in seconds, cuts video if set
     metadata: Optional[Dict[str, str]] = None,  # iPhone/Android spoofed metadata
-) -> List[str]:
+) -> Tuple[List[str], Optional[Path]]:
+    """Retourne (cmd, ass_path_temp) — l'appelant doit cleanup le ass_path après."""
     font_size = font_size_px if font_size_px else _font_size_for_size(size_label)
+
     if position_pct is not None:
-        # Convert percent (0..100) to a y= expr; account for text_h so text stays in frame
-        # 0% = top, 100% = bottom
-        pct = max(0.0, min(100.0, float(position_pct))) / 100.0
-        y_expr = f"(h-text_h)*{pct:.4f}"
+        align_code = 8  # top + MarginV qui descend
+        margin_v = int(TARGET_H * (max(0.0, min(100.0, position_pct)) / 100.0))
     else:
-        y_expr = _y_position_for_align(align, font_size)
-    font = _font_path()
+        align_code = _ass_align_for(align)
+        margin_v = _margin_v_for_align(align)
 
-    safe_text = _escape_drawtext(caption or "")
-    drawtext_parts = [
-        f"text='{safe_text}'",
-        f"fontsize={font_size}",
-        "fontcolor=white",
-        "borderw=4",
-        "bordercolor=black@0.85",
-        "box=1",
-        "boxcolor=black@0.45",
-        "boxborderw=18",
-        "x=(w-text_w)/2",
-        f"y={y_expr}",
-        "line_spacing=8",
+    # Génère le fichier ASS pour la caption
+    ass_path: Optional[Path] = None
+    vf_parts = [
+        f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease",
+        f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:color=black",
+        "setsar=1",
     ]
-    if font:
-        drawtext_parts.insert(0, f"fontfile={font}")
+    if caption and caption.strip():
+        ass_path = _build_ass_file(
+            caption=caption,
+            font_size=font_size,
+            margin_v=margin_v,
+            align_code=align_code,
+            duration_s=max_duration if max_duration and max_duration > 0 else 600.0,
+        )
+        # Le filtre subtitles veut un path ASS. On échappe les caractères spéciaux dans le path.
+        ass_path_str = str(ass_path).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+        vf_parts.append(f"subtitles='{ass_path_str}'")
 
-    drawtext = "drawtext=" + ":".join(drawtext_parts)
-
-    vf = (
-        f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease,"
-        f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:color=black,"
-        f"setsar=1,"
-        + drawtext
-    )
+    vf = ",".join(vf_parts)
 
     cmd: List[str] = ["ffmpeg", "-y"]
     cmd += ["-i", video_path]
@@ -171,7 +277,7 @@ def _build_ffmpeg_cmd(
         cmd += metadata_randomizer.metadata_to_ffmpeg_args(metadata)
 
     cmd += [str(out_path)]
-    return cmd
+    return cmd, ass_path
 
 
 def mix_one(
@@ -192,8 +298,8 @@ def mix_one(
     # Generate randomized iPhone/Android metadata
     meta = metadata_randomizer.random_metadata(device_choice)
 
-    cmd = _build_ffmpeg_cmd(video_path, caption, align, size_label, music_path,
-                            audio_priority, out_path, metadata=meta)
+    cmd, ass_path = _build_ffmpeg_cmd(video_path, caption, align, size_label, music_path,
+                                       audio_priority, out_path, metadata=meta)
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
@@ -201,6 +307,13 @@ def mix_one(
             raise RuntimeError(f"FFmpeg failed: {result.stderr[-500:]}")
     except subprocess.TimeoutExpired:
         raise RuntimeError("FFmpeg timeout")
+    finally:
+        # Cleanup ASS temp file
+        if ass_path and ass_path.exists():
+            try:
+                ass_path.unlink()
+            except Exception:
+                pass
 
     # Post-patch MP4 atoms with distinct creation_time per stream
     try:
@@ -331,7 +444,7 @@ def mix_batch_stream(
         device_label = spoof_meta.get("model", "?")
         yield {"type": "log", "level": "INFO", "message": f"Spoofing as {platform_label} {device_label}"}
 
-        cmd = _build_ffmpeg_cmd(
+        cmd, ass_path = _build_ffmpeg_cmd(
             vid["path"], tpl.get("caption", ""), tpl.get("align", "center"),
             size_label, music_path, audio_priority, out_path,
             position_pct=position_pct,
@@ -385,7 +498,16 @@ def mix_batch_stream(
                 err = (proc.stderr.read() if proc.stderr else "")[-300:]
                 yield {"type": "log", "level": "ERROR", "message": f"FFmpeg fail: {err.strip()[:120]}"}
                 yield {"type": "item_error", "index": item_idx, "error": err}
+                # cleanup ASS even on error
+                if ass_path and ass_path.exists():
+                    try: ass_path.unlink()
+                    except Exception: pass
                 continue
+
+            # Cleanup ASS temp après ffmpeg success
+            if ass_path and ass_path.exists():
+                try: ass_path.unlink()
+                except Exception: pass
 
             # Post-patch MP4 atoms with distinct creation_time per stream
             try:
