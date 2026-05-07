@@ -1967,3 +1967,28 @@ kbd {
     .bb-inner { flex-wrap: wrap; gap: 8px; padding: 8px; }
     .bb-launch { width: 100%; margin: 4px 0 0; order: 99; }
 }
+
+/* Drag & drop highlight sur la card "Dossier des vidéos brutes" */
+.card.dragover-card {
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 2px var(--cyan-soft);
+    background: var(--bg-card-hover);
+    transition: all var(--t-fast);
+}
+.card.dragover-card::before {
+    content: "📥 Lâche tes vidéos ici";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--cyan);
+    color: #000;
+    padding: 12px 24px;
+    border-radius: var(--r-md);
+    font-weight: 700;
+    font-size: 16px;
+    z-index: 10;
+    pointer-events: none;
+    box-shadow: 0 8px 24px var(--cyan-glow);
+}
+.card.dragover-card { position: relative; }

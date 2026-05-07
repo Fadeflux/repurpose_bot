@@ -1111,6 +1111,56 @@ document.getElementById('folder-loader').addEventListener('change', async (e) =>
     e.target.value = '';
 });
 
+// Drag & drop sur la 1ère card "Dossier des vidéos brutes"
+// Permet de drop des fichiers ou un dossier directement sur la card top
+const folderRow = document.querySelector('#step-3 .folder-row');
+const folderCard = document.querySelector('#step-3 .card');
+const folderPathDisplay = document.getElementById('folder-path-display');
+[folderRow, folderCard, folderPathDisplay].forEach(zone => {
+    if (!zone) return;
+    ['dragenter', 'dragover'].forEach(ev =>
+        zone.addEventListener(ev, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            folderCard.classList.add('dragover-card');
+        })
+    );
+    ['dragleave', 'drop'].forEach(ev =>
+        zone.addEventListener(ev, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            folderCard.classList.remove('dragover-card');
+        })
+    );
+});
+folderCard?.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    folderCard.classList.remove('dragover-card');
+    const files = await getFilesFromDropEvent(e);
+    if (!files || files.length === 0) return;
+    const videos = files.filter(isVideoFile);
+    if (videos.length === 0) {
+        toast('Aucune vidéo détectée dans ce drop', true);
+        return;
+    }
+    // Si plusieurs fichiers d'un dossier, on affiche le nom du dossier
+    const firstWithRel = videos.find(v => v.webkitRelativePath);
+    if (firstWithRel) {
+        const folderPath = firstWithRel.webkitRelativePath.split('/')[0];
+        folderPathDisplay.value = folderPath;
+    } else {
+        folderPathDisplay.value = `${videos.length} fichier(s) déposé(s)`;
+    }
+    toast(`📥 ${videos.length} vidéo(s) reçue(s)`);
+    await uploadVideoFiles(videos);
+});
+
+// Bloque la navigation par défaut quand on drop des fichiers à côté d'une zone
+// (sinon le navigateur ouvre la vidéo et on quitte la page ClipFusion)
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+
 // Tout charger -> just shortcut to file picker (multi-file)
 document.getElementById('btn-load-all').addEventListener('click', () => {
     document.getElementById('video-input').click();
