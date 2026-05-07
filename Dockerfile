@@ -1,8 +1,13 @@
 FROM python:3.11-slim
 
-# Installation de FFmpeg + ffprobe (nécessaires pour le traitement vidéo)
+# Installation de FFmpeg + ffprobe (Repurpose Bot) + Tesseract OCR + fonts (ClipFusion)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    tesseract-ocr \
+    tesseract-ocr-fra \
+    tesseract-ocr-eng \
+    fonts-dejavu-core \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
