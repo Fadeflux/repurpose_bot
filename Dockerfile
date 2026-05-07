@@ -1,6 +1,8 @@
 FROM python:3.11-slim
 
-# Installation de FFmpeg + ffprobe (Repurpose Bot) + Tesseract OCR + fonts (ClipFusion)
+# Installation de FFmpeg + ffprobe + Tesseract OCR + polices Insta-style
+# - fonts-noto-color-emoji : emojis colorés style mobile (équivalent libre Apple emojis)
+# - fonts-inter : police Insta/TikTok-like (Helvetica-ish, arrondie, bold dispo)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     tesseract-ocr \
@@ -8,6 +10,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-eng \
     fonts-dejavu-core \
     fonts-liberation \
+    fonts-noto-color-emoji \
+    fonts-noto-core \
+    fonts-inter \
+    fontconfig \
+    && fc-cache -fv \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
