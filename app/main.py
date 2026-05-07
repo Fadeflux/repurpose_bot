@@ -8,7 +8,11 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.routes.video import router as video_router
-from app.routes.geelark import router as geelark_router
+from app.routes.cf_templates import router as cf_templates_router
+from app.routes.cf_content import router as cf_content_router
+from app.routes.cf_music import router as cf_music_router
+from app.routes.cf_extractor import router as cf_extractor_router
+from app.routes.cf_mixer import router as cf_mixer_router
 from app.services.auth import (
     check_password,
     is_authenticated,
@@ -35,7 +39,13 @@ app.add_middleware(
 )
 
 app.include_router(video_router)
-app.include_router(geelark_router)
+
+# === ClipFusion routes (préfixe /api/clipfusion/...) ===
+app.include_router(cf_templates_router)
+app.include_router(cf_content_router)
+app.include_router(cf_music_router)
+app.include_router(cf_extractor_router)
+app.include_router(cf_mixer_router)
 
 # Sert les fichiers statiques (CSS, JS, images si besoin)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -60,6 +70,16 @@ async def on_startup():
             logger.warning("DATABASE_URL non défini, emails VA stockés uniquement en cache éphémère")
     except Exception as e:
         logger.warning(f"Init Postgres échoué: {e}")
+    # Initialise la DB Postgres pour ClipFusion (4 tables cf_*)
+    try:
+        from app.services.cf_storage import init_schema as cf_init_schema, is_db_enabled as cf_db_enabled
+        if cf_db_enabled():
+            cf_init_schema()
+            logger.info("Postgres pour ClipFusion : OK")
+        else:
+            logger.warning("ClipFusion : DATABASE_URL absent, fonctionnalités persistantes désactivées")
+    except Exception as e:
+        logger.warning(f"Init ClipFusion DB échoué: {e}")
     # Lance la sync automatique des VA Discord en arrière-plan
     try:
         from app.services.discord_va_sync import start_periodic_sync
@@ -112,6 +132,17 @@ async def logout():
 # =============================================================================
 # Page principale (protégée si auth activée)
 # =============================================================================
+@app.get("/clipfusion")
+async def clipfusion_page(request: Request):
+    """Sert l'interface ClipFusion (étapes Extracteur → Templates → Mix)."""
+    if is_auth_enabled() and not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=302)
+    cf_index = STATIC_DIR / "clipfusion" / "index.html"
+    if cf_index.exists():
+        return FileResponse(cf_index)
+    return {"error": "ClipFusion frontend not found", "expected_at": str(cf_index)}
+
+
 @app.get("/")
 async def root(request: Request):
     """Sert l'interface HTML, ou redirige vers /login si pas authentifié."""
