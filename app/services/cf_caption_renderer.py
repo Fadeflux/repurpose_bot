@@ -116,15 +116,24 @@ def _render_emoji_to_image(emoji_str: str, target_size: int) -> Optional[Image.I
     if not is_apple_emoji_available():
         return None
 
-    try:
-        # Pillow ne peut charger Apple Color Emoji qu'à la taille SBIX native (137)
-        emoji_font = ImageFont.truetype(str(APPLE_EMOJI_FONT), APPLE_EMOJI_NATIVE_SIZE)
-    except Exception as e:
-        logger.warning(f"Apple emoji font load failed: {e}")
+    # Apple Color Emoji a des tailles SBIX fixes. La bonne taille varie selon
+    # la version : Apple original = 20/32/40/48/64/96/160, apple-emoji-linux = 96/137/160
+    # On essaie dans l'ordre jusqu'à ce qu'une marche.
+    emoji_font = None
+    used_size = None
+    for try_size in [160, 137, 96, 64, 48, 40, 32, 20]:
+        try:
+            emoji_font = ImageFont.truetype(str(APPLE_EMOJI_FONT), try_size)
+            used_size = try_size
+            break
+        except Exception:
+            continue
+    if emoji_font is None:
+        logger.warning("Apple emoji font: aucune taille SBIX ne fonctionne")
         return None
 
-    # Crée une image de la taille native + un peu de marge pour pas tronquer
-    canvas_size = APPLE_EMOJI_NATIVE_SIZE + 20
+    # Crée une image carrée à la taille du SBIX trouvé + un peu de marge
+    canvas_size = used_size + 20
     img = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     try:
@@ -138,13 +147,15 @@ def _render_emoji_to_image(emoji_str: str, target_size: int) -> Optional[Image.I
     bbox = img.getbbox()
     if bbox:
         img = img.crop(bbox)
+    else:
+        # Rien dessiné → emoji pas dans la font
+        return None
 
     # Resize à la taille cible (LANCZOS = haute qualité)
     if img.size != (target_size, target_size):
-        # On garde le ratio (au cas où l'emoji n'est pas carré après crop)
         ratio = target_size / max(img.size)
-        new_w = int(img.size[0] * ratio)
-        new_h = int(img.size[1] * ratio)
+        new_w = max(1, int(img.size[0] * ratio))
+        new_h = max(1, int(img.size[1] * ratio))
         img = img.resize((new_w, new_h), Image.LANCZOS)
 
     return img
