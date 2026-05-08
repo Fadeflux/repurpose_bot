@@ -15,6 +15,10 @@ const state = {
     durationEnabled: false,
     durationSec: 15,
     captionStyle: 'outlined',
+    selectedVA: '',
+    selectedTeam: 'geelark',
+    selectedDevice: 'smart_mix',
+    vasByTeam: { geelark: [], instagram: [] },
 };
 
 // ============ EMOJI DATA ============
@@ -1729,6 +1733,9 @@ function startMix() {
         position_pct: state.positionPct,
         font_size_px: state.fontSizePx,
         caption_style: state.captionStyle || 'outlined',
+        device_choice: state.selectedDevice || 'smart_mix',
+        va_name: state.selectedVA || '',
+        team: state.selectedTeam || '',
     });
     if (state.durationEnabled) {
         params.append('max_duration', state.durationSec);
@@ -1907,6 +1914,70 @@ async function refreshAll() {
     await Promise.all([refreshTemplates(), refreshVideos(), refreshMusic(), refreshMixCounts()]);
 }
 
+// ============ DESTINATION (Équipe + VA + Device) ============
+async function loadVAs() {
+    try {
+        const res = await fetch(API + '/list-vas');
+        if (!res.ok) return;
+        const data = await res.json();
+        state.vasByTeam = data.teams || { geelark: [], instagram: [] };
+        renderVASelect();
+    } catch (e) {
+        console.warn('loadVAs failed', e);
+    }
+}
+
+function renderVASelect() {
+    const sel = document.getElementById('cf-va');
+    const team = state.selectedTeam;
+    const list = state.vasByTeam[team] || [];
+    const countSpan = document.getElementById('cf-va-count');
+    if (countSpan) countSpan.textContent = list.length ? `(${list.length})` : '';
+
+    sel.innerHTML = '<option value="">— Aucun VA (juste mix) —</option>';
+    list.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.name;
+        opt.textContent = v.name;
+        sel.appendChild(opt);
+    });
+    // Restaure la sélection si toujours valide
+    if (state.selectedVA && list.some(v => v.name === state.selectedVA)) {
+        sel.value = state.selectedVA;
+    } else {
+        state.selectedVA = '';
+    }
+}
+
+document.getElementById('cf-team').addEventListener('change', (e) => {
+    state.selectedTeam = e.target.value;
+    renderVASelect();
+});
+document.getElementById('cf-va').addEventListener('change', (e) => {
+    state.selectedVA = e.target.value;
+});
+document.getElementById('cf-device').addEventListener('change', (e) => {
+    state.selectedDevice = e.target.value;
+});
+document.getElementById('cf-resync-vas').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.classList.add('spinning');
+    try {
+        const res = await fetch(API + '/resync-vas', { method: 'POST' });
+        const data = await res.json();
+        if (data.ok) {
+            toast(`✓ ${data.total || 0} VA(s) resynchro`);
+            await loadVAs();
+        } else {
+            toast('Resync failed: ' + (data.error || ''), true);
+        }
+    } catch (e) {
+        toast('Resync error: ' + e.message, true);
+    } finally {
+        btn.classList.remove('spinning');
+    }
+});
+
 // Build manual emoji row on load
 buildEmojiQuickRow('manual-emoji-quick', 'caption-text');
 
@@ -1917,3 +1988,4 @@ syncSizeButtons();
 
 // Initial load
 refreshAll();
+loadVAs();

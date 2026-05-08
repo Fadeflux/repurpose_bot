@@ -406,6 +406,82 @@
             </div>
         </div>
 
+        <!-- Row Destination : Équipe + VA + Device (réutilise pipeline Repurpose) -->
+        <div class="mix-row">
+            <div class="card" style="flex:1;">
+                <label class="card-label">🎯 DESTINATION — DRIVE + DISCORD</label>
+                <div class="dest-grid">
+                    <div class="dest-field">
+                        <span class="muted small">Équipe</span>
+                        <select id="cf-team" class="dest-select">
+                            <option value="geelark">Geelark</option>
+                            <option value="instagram">Instagram</option>
+                        </select>
+                    </div>
+                    <div class="dest-field" style="flex:1;">
+                        <span class="muted small">VA cible <span id="cf-va-count" class="muted small"></span></span>
+                        <div style="display:flex; gap:6px;">
+                            <select id="cf-va" class="dest-select" style="flex:1;">
+                                <option value="">— Aucun VA (juste mix) —</option>
+                            </select>
+                            <button type="button" id="cf-resync-vas" class="btn-resync" title="Resync VAs depuis Discord">🔄</button>
+                        </div>
+                    </div>
+                    <div class="dest-field" style="flex:1.4;">
+                        <span class="muted small">Device simulé (metadata)</span>
+                        <select id="cf-device" class="dest-select">
+                            <optgroup label="🎲 Aléatoire">
+                                <option value="smart_mix" selected>🎯 Smart Mix (recommandé)</option>
+                                <option value="mix_random">Mix iPhone + Android</option>
+                                <option value="iphone_random">📱 iPhone aléatoire</option>
+                                <option value="android_random">🅰️ Android aléatoire</option>
+                                <option value="samsung_random">Samsung aléatoire</option>
+                                <option value="pixel_random">Google Pixel aléatoire</option>
+                            </optgroup>
+                            <optgroup label="📱 iPhone 17">
+                                <option value="iphone_17_pro_max">iPhone 17 Pro Max</option>
+                                <option value="iphone_17_pro">iPhone 17 Pro</option>
+                                <option value="iphone_17_air">iPhone 17 Air</option>
+                                <option value="iphone_17">iPhone 17</option>
+                            </optgroup>
+                            <optgroup label="📱 iPhone 16">
+                                <option value="iphone_16_pro_max">iPhone 16 Pro Max</option>
+                                <option value="iphone_16_pro">iPhone 16 Pro</option>
+                                <option value="iphone_16_plus">iPhone 16 Plus</option>
+                                <option value="iphone_16">iPhone 16</option>
+                                <option value="iphone_16e">iPhone 16e</option>
+                            </optgroup>
+                            <optgroup label="🅰️ Samsung S25">
+                                <option value="samsung_s25_ultra">Galaxy S25 Ultra</option>
+                                <option value="samsung_s25_plus">Galaxy S25+</option>
+                                <option value="samsung_s25">Galaxy S25</option>
+                            </optgroup>
+                            <optgroup label="🅰️ Samsung S24">
+                                <option value="samsung_s24_ultra">Galaxy S24 Ultra</option>
+                                <option value="samsung_s24_plus">Galaxy S24+</option>
+                                <option value="samsung_s24">Galaxy S24</option>
+                            </optgroup>
+                            <optgroup label="🅰️ Pixel">
+                                <option value="pixel_9_pro_xl">Pixel 9 Pro XL</option>
+                                <option value="pixel_9_pro">Pixel 9 Pro</option>
+                                <option value="pixel_9">Pixel 9</option>
+                                <option value="pixel_8_pro">Pixel 8 Pro</option>
+                                <option value="pixel_8">Pixel 8</option>
+                            </optgroup>
+                            <optgroup label="🅰️ Xiaomi">
+                                <option value="xiaomi_15_ultra">Xiaomi 15 Ultra</option>
+                                <option value="xiaomi_15_pro">Xiaomi 15 Pro</option>
+                                <option value="xiaomi_15">Xiaomi 15</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                </div>
+                <div class="muted small" id="cf-va-hint" style="margin-top:8px;">
+                    Si un VA est sélectionné, le batch sera partagé avec son Drive et notifié sur Discord.
+                </div>
+            </div>
+        </div>
+
         <!-- Row 2: priorité audio + caption position/taille -->
         <div class="mix-row">
             <div class="card">

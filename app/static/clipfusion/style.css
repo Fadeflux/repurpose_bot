@@ -2017,3 +2017,56 @@ kbd {
     background: var(--cyan-soft);
     box-shadow: 0 0 0 1px var(--cyan-soft);
 }
+
+/* Destination row : Équipe / VA / Device */
+.dest-grid {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.dest-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.dest-select {
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 9px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all var(--t-fast);
+    min-width: 130px;
+}
+.dest-select:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-card-hover);
+}
+.dest-select:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 1px var(--cyan-soft);
+}
+.btn-resync {
+    background: var(--bg-card);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 0 12px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all var(--t-fast);
+}
+.btn-resync:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
+.btn-resync.spinning {
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
