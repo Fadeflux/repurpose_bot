@@ -2,12 +2,16 @@
 Rendu pixel-parfait des captions style Insta/TikTok via Pillow.
 
 Génère une image RGBA transparente avec :
-  - Texte Inter Bold blanc
+  - Texte Inter Bold blanc (style Helvetica/Insta)
   - Background noir semi-transparent arrondi (style TikTok box)
-  - Emojis remplacés par leurs PNGs Apple (téléchargés dans /opt/apple-emoji)
+  - Emojis natifs Apple Color (font apple-emoji-linux téléchargée par Dockerfile)
+
+Stratégie : on dessine token par token. Les chunks de texte sont rendus avec Inter,
+les chunks emoji sont rendus à 137px (taille SBIX native) puis resized au besoin
+et collés à la position courante.
 
 Utilisé en overlay FFmpeg : moteur > drawtext/subtitles, contrôle pixel-précis,
-emojis colorés natifs.
+emojis colorés Apple natifs.
 """
 import os
 import re
@@ -20,11 +24,15 @@ from app.utils.logger import get_logger
 
 logger = get_logger("cf_caption_renderer")
 
-# Dossier des emojis Apple installés par le Dockerfile
-APPLE_EMOJI_DIR = Path("/opt/apple-emoji")
+# Path de la font Apple Color Emoji téléchargée par le Dockerfile
+APPLE_EMOJI_FONT = Path("/opt/fonts/AppleColorEmoji.ttf")
 
-# Polices candidate (Inter Bold = Insta-look)
-FONT_CANDIDATES = [
+# Taille SBIX native de la font Apple (la seule supportée pour le rendu).
+# On dessine les emojis à cette taille puis on les resize.
+APPLE_EMOJI_NATIVE_SIZE = 137
+
+# Polices texte (Inter Bold = Insta-look)
+FONT_TEXT_CANDIDATES = [
     "/usr/share/fonts/truetype/inter/Inter-Bold.ttf",
     "/usr/share/fonts/opentype/inter/Inter-Bold.otf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -33,102 +41,56 @@ FONT_CANDIDATES = [
 
 # Style box TikTok/Insta
 DEFAULT_BOX_ALPHA = 180        # ~70% noir (255 = opaque)
-DEFAULT_BOX_RADIUS = 8         # rayon coins arrondis
-DEFAULT_BOX_PAD_X = 18         # padding horizontal interne
-DEFAULT_BOX_PAD_Y = 10         # padding vertical interne
+DEFAULT_BOX_RADIUS = 10        # rayon coins arrondis
+DEFAULT_BOX_PAD_X = 22         # padding horizontal interne
+DEFAULT_BOX_PAD_Y = 12         # padding vertical interne
 DEFAULT_LINE_SPACING = 6
 
 
-def _get_font_path() -> str:
-    """Trouve la première police dispo dans la liste."""
-    for c in FONT_CANDIDATES:
+def _get_text_font_path() -> str:
+    """Trouve la première police de texte dispo."""
+    for c in FONT_TEXT_CANDIDATES:
         if os.path.exists(c):
             return c
-    raise RuntimeError("Aucune police trouvée pour le rendu caption")
+    raise RuntimeError("Aucune police texte trouvée")
+
+
+def is_apple_emoji_available() -> bool:
+    """Check si la font Apple Color Emoji est dispo."""
+    return APPLE_EMOJI_FONT.exists()
 
 
 # ---------------------------------------------------------------------------
 # Détection des emojis dans le texte
 # ---------------------------------------------------------------------------
-# Plages Unicode emoji courantes
 _EMOJI_PATTERN = re.compile(
     "["
-    "\U0001F600-\U0001F64F"  # emoticons
-    "\U0001F300-\U0001F5FF"  # symbols & pictographs
-    "\U0001F680-\U0001F6FF"  # transport & map
-    "\U0001F1E0-\U0001F1FF"  # flags
-    "\U00002500-\U00002BEF"  # chinese
-    "\U00002702-\U000027B0"  # dingbats
+    "\U0001F600-\U0001F64F"
+    "\U0001F300-\U0001F5FF"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F1E0-\U0001F1FF"
+    "\U00002500-\U00002BEF"
+    "\U00002702-\U000027B0"
     "\U000024C2-\U0001F251"
-    "\U0001f926-\U0001f937"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FA6F"
+    "\U0001FA70-\U0001FAFF"
     "\U00010000-\U0010FFFF"
     "\u2640-\u2642"
     "\u2600-\u2B55"
-    "\u200d"                 # zero-width joiner
+    "\u200d"
     "\u23cf"
     "\u23e9"
     "\u231a"
-    "\ufe0f"                 # variation selector
+    "\ufe0f"
     "\u3030"
     "]+",
     flags=re.UNICODE,
 )
 
 
-def _emoji_to_codepoints(emoji: str) -> str:
-    """Convertit un emoji en string codepoints style apple-emoji-linux.
-    Ex: '❤️' (U+2764 U+FE0F) → '2764-fe0f'
-    Ex: '😀' (U+1F600)        → '1f600'
-    """
-    parts = []
-    for ch in emoji:
-        code = ord(ch)
-        # Skip variation selectors quand on cherche le PNG (Apple les ignore en général)
-        if code == 0xFE0F:
-            continue
-        parts.append(f"{code:x}")
-    return "-".join(parts)
-
-
-def _find_emoji_png(emoji: str) -> Optional[Path]:
-    """Cherche le PNG correspondant à un emoji dans /opt/apple-emoji/."""
-    if not APPLE_EMOJI_DIR.exists():
-        return None
-
-    # Tente plusieurs variantes du nom (avec/sans variation selector)
-    candidates = []
-    full_codepoints = _emoji_to_codepoints(emoji)
-    if full_codepoints:
-        candidates.append(full_codepoints)
-        # Aussi : codepoint principal seul
-        first = emoji[0]
-        candidates.append(_emoji_to_codepoints(first))
-
-    for codepoints in candidates:
-        if not codepoints:
-            continue
-        # Plusieurs naming conventions possibles selon le repo source
-        for variant in [
-            f"{codepoints}.png",
-            f"emoji_u{codepoints.replace('-', '_')}.png",
-            f"u{codepoints}.png",
-        ]:
-            p = APPLE_EMOJI_DIR / variant
-            if p.exists():
-                return p
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Tokenization : sépare le texte en (text_chunks, emoji_chunks)
-# ---------------------------------------------------------------------------
 def _tokenize(text: str) -> List[Tuple[str, str]]:
-    """
-    Coupe le texte en tokens (kind, value) :
-    - ("text", "Hello ")
-    - ("emoji", "😀")
-    - ("text", " world")
-    """
+    """Coupe le texte en tokens (kind, value) : 'text' | 'emoji'."""
     if not text:
         return []
     tokens: List[Tuple[str, str]] = []
@@ -136,10 +98,7 @@ def _tokenize(text: str) -> List[Tuple[str, str]]:
     for m in _EMOJI_PATTERN.finditer(text):
         if m.start() > pos:
             tokens.append(("text", text[pos:m.start()]))
-        emoji_chunk = m.group(0)
-        # Sépare les emojis composés en emojis individuels (1 par 1)
-        # Note : ZWJ sequences (👨‍👩‍👧) restent groupées par le PATTERN, on les laisse tel quel
-        tokens.append(("emoji", emoji_chunk))
+        tokens.append(("emoji", m.group(0)))
         pos = m.end()
     if pos < len(text):
         tokens.append(("text", text[pos:]))
@@ -147,12 +106,57 @@ def _tokenize(text: str) -> List[Tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Rendu principal
+# Rendu d'un emoji unique en image RGBA (taille cible donnée)
+# ---------------------------------------------------------------------------
+def _render_emoji_to_image(emoji_str: str, target_size: int) -> Optional[Image.Image]:
+    """
+    Dessine un emoji avec Apple Color Emoji font sur une image transparente,
+    puis resize à target_size.
+    """
+    if not is_apple_emoji_available():
+        return None
+
+    try:
+        # Pillow ne peut charger Apple Color Emoji qu'à la taille SBIX native (137)
+        emoji_font = ImageFont.truetype(str(APPLE_EMOJI_FONT), APPLE_EMOJI_NATIVE_SIZE)
+    except Exception as e:
+        logger.warning(f"Apple emoji font load failed: {e}")
+        return None
+
+    # Crée une image de la taille native + un peu de marge pour pas tronquer
+    canvas_size = APPLE_EMOJI_NATIVE_SIZE + 20
+    img = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    try:
+        # embedded_color=True permet à Pillow de rendre les glyphes color SBIX
+        draw.text((10, 10), emoji_str, font=emoji_font, embedded_color=True)
+    except Exception as e:
+        logger.warning(f"Emoji draw failed for {repr(emoji_str)}: {e}")
+        return None
+
+    # Crop sur le contenu réel (bbox de la zone non-transparente)
+    bbox = img.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+
+    # Resize à la taille cible (LANCZOS = haute qualité)
+    if img.size != (target_size, target_size):
+        # On garde le ratio (au cas où l'emoji n'est pas carré après crop)
+        ratio = target_size / max(img.size)
+        new_w = int(img.size[0] * ratio)
+        new_h = int(img.size[1] * ratio)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+
+    return img
+
+
+# ---------------------------------------------------------------------------
+# Rendu principal de la caption
 # ---------------------------------------------------------------------------
 def render_caption_png(
     text: str,
     font_size: int = 56,
-    max_width: int = 980,                       # max width avant wrap (px)
+    max_width: int = 980,
     out_path: Optional[Path] = None,
     box_alpha: int = DEFAULT_BOX_ALPHA,
     box_radius: int = DEFAULT_BOX_RADIUS,
@@ -160,45 +164,34 @@ def render_caption_png(
     pad_y: int = DEFAULT_BOX_PAD_Y,
     line_spacing: int = DEFAULT_LINE_SPACING,
 ) -> Path:
-    """
-    Rend une caption en PNG RGBA.
+    """Rend une caption en PNG RGBA, retourne le path."""
+    text_font_path = _get_text_font_path()
+    text_font = ImageFont.truetype(text_font_path, font_size)
+    emoji_size = int(font_size * 1.15)  # un peu plus gros que le texte pour matcher
 
-    Strategy : layout simple ligne par ligne, avec wrap au mot quand la ligne
-    dépasse max_width. Chaque ligne a sa propre box noire (style TikTok).
-
-    Retourne le path du PNG généré.
-    """
-    font_path = _get_font_path()
-    font = ImageFont.truetype(font_path, font_size)
-
-    # Hauteur emoji = hauteur ligne (un peu plus grand pour matcher le baseline)
-    emoji_size = int(font_size * 1.1)
-
-    # Étape 1 : tokenize + word-wrap
-    # On split d'abord par lignes explicites (\n), puis on fait du wrap au mot
-    raw_lines = (text or "").split("\n")
-    layout_lines: List[List[Tuple[str, str]]] = []  # liste de lignes, chaque ligne = liste de tokens
-
-    # Image temp pour mesurer textes
+    # ---------- Étape 1 : tokenize + word-wrap ----------
     tmp = Image.new("RGBA", (1, 1))
-    draw = ImageDraw.Draw(tmp)
+    measure_draw = ImageDraw.Draw(tmp)
 
-    def measure_token(kind: str, value: str) -> int:
+    def text_width(s: str) -> int:
+        bbox = measure_draw.textbbox((0, 0), s, font=text_font)
+        return bbox[2] - bbox[0]
+
+    def token_width(kind: str, value: str) -> int:
         if kind == "emoji":
             return emoji_size
-        bbox = draw.textbbox((0, 0), value, font=font)
-        return bbox[2] - bbox[0]
+        return text_width(value)
+
+    raw_lines = (text or "").split("\n")
+    layout_lines: List[List[Tuple[str, str]]] = []
 
     for raw_line in raw_lines:
         tokens = _tokenize(raw_line)
-        # Word-wrap : on accumule les tokens, on coupe au mot avant overflow
-        current_line: List[Tuple[str, str]] = []
-        current_w = 0
-        # On split les tokens "text" en mots pour pouvoir wrapper
+        # Expand "text" tokens en mots pour permettre le word-wrap
         expanded: List[Tuple[str, str]] = []
         for kind, val in tokens:
             if kind == "text":
-                # On garde les espaces dans les mots qui les précèdent (pour le rendu)
+                # Split en mots (en gardant les espaces)
                 words = re.split(r"(\s+)", val)
                 for w in words:
                     if w:
@@ -206,94 +199,79 @@ def render_caption_png(
             else:
                 expanded.append((kind, val))
 
+        current: List[Tuple[str, str]] = []
+        current_w = 0
         for kind, val in expanded:
-            w = measure_token(kind, val)
-            # Si ajouter ce token dépasse la largeur ET qu'on a déjà du contenu : nouvelle ligne
-            if current_line and current_w + w > max_width:
-                layout_lines.append(current_line)
-                current_line = []
+            w = token_width(kind, val)
+            if current and current_w + w > max_width:
+                layout_lines.append(current)
+                current = []
                 current_w = 0
-                # skip pure-whitespace au début de nouvelle ligne
+                # skip whitespace en début de nouvelle ligne
                 if kind == "text" and val.strip() == "":
                     continue
-            current_line.append((kind, val))
+            current.append((kind, val))
             current_w += w
+        if current:
+            layout_lines.append(current)
 
-        if current_line:
-            layout_lines.append(current_line)
-
-    # Si aucune ligne (texte vide), on génère une PNG 1x1 transparente
     if not layout_lines:
         out = out_path or Path("/tmp/clipfusion/output/_caption_empty.png")
         out.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGBA", (1, 1), (0, 0, 0, 0)).save(out)
         return out
 
-    # Étape 2 : calcule les dimensions de chaque ligne (largeur réelle + hauteur uniforme)
-    line_height = font_size + 4   # un peu de padding interne
-    line_metrics = []  # (line_width, line_tokens)
+    # ---------- Étape 2 : dimensions de chaque ligne ----------
+    line_height = max(font_size + 8, emoji_size + 4)
+    line_metrics = []
     for line in layout_lines:
-        lw = sum(measure_token(k, v) for k, v in line)
+        lw = sum(token_width(k, v) for k, v in line)
         line_metrics.append((lw, line))
 
-    # Étape 3 : dimensions canvas final
     max_line_w = max(lw for lw, _ in line_metrics)
     total_w = max_line_w + 2 * pad_x
-    total_h = len(line_metrics) * line_height + 2 * pad_y + (len(line_metrics) - 1) * line_spacing
+    total_h = (
+        len(line_metrics) * line_height
+        + 2 * pad_y
+        + (len(line_metrics) - 1) * line_spacing
+    )
 
-    # Étape 4 : création canvas + dessin
+    # ---------- Étape 3 : crée canvas + dessine box noire ----------
     img = Image.new("RGBA", (total_w, total_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img, "RGBA")
 
-    # Une seule grosse box derrière TOUTES les lignes (style "block")
     draw.rounded_rectangle(
         (0, 0, total_w, total_h),
         radius=box_radius,
         fill=(0, 0, 0, box_alpha),
     )
 
-    # Étape 5 : dessin des lignes (centrées horizontalement)
+    # ---------- Étape 4 : dessine chaque ligne ----------
     y = pad_y
     for lw, line in line_metrics:
         x = (total_w - lw) // 2
-        # Dessine chaque token sur la ligne
         for kind, val in line:
             if kind == "emoji":
-                emoji_png = _find_emoji_png(val)
-                if emoji_png:
-                    try:
-                        emoji_img = Image.open(emoji_png).convert("RGBA")
-                        emoji_img = emoji_img.resize((emoji_size, emoji_size), Image.LANCZOS)
-                        # Vertical center of line
-                        ey = y + (line_height - emoji_size) // 2
-                        img.paste(emoji_img, (x, ey), emoji_img)
-                    except Exception as e:
-                        logger.warning(f"emoji paste failed for '{val}': {e}")
-                        # Fallback : draw text
-                        draw.text((x, y), val, font=font, fill=(255, 255, 255, 255))
+                emoji_img = _render_emoji_to_image(val, emoji_size)
+                if emoji_img:
+                    # Center vertical sur la ligne
+                    ey = y + (line_height - emoji_img.size[1]) // 2
+                    img.paste(emoji_img, (x, ey), emoji_img)
+                    x += emoji_img.size[0]
                 else:
-                    # Pas de PNG trouvé pour cet emoji → tente fallback texte
-                    logger.warning(f"emoji PNG not found for {repr(val)} (codepoints={_emoji_to_codepoints(val)})")
-                    draw.text((x, y), val, font=font, fill=(255, 255, 255, 255))
-                x += emoji_size
+                    # Fallback texte si emoji rendering fail
+                    draw.text((x, y), val, font=text_font, fill=(255, 255, 255, 255))
+                    x += emoji_size
             else:
-                draw.text((x, y), val, font=font, fill=(255, 255, 255, 255))
-                bbox = draw.textbbox((0, 0), val, font=font)
-                x += bbox[2] - bbox[0]
+                # Texte blanc
+                draw.text((x, y), val, font=text_font, fill=(255, 255, 255, 255))
+                x += text_width(val)
         y += line_height + line_spacing
 
-    # Sauvegarde
+    # ---------- Étape 5 : sauvegarde ----------
     if out_path is None:
         import random as _r
         out_path = Path("/tmp/clipfusion/output") / f"_caption_{_r.randint(100000, 999999)}.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path, "PNG")
     return out_path
-
-
-def is_apple_emoji_available() -> bool:
-    """Check si les PNGs Apple sont bien installés."""
-    if not APPLE_EMOJI_DIR.exists():
-        return False
-    # Au moins quelques fichiers
-    return len(list(APPLE_EMOJI_DIR.glob("*.png"))) > 50
