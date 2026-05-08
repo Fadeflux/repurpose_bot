@@ -227,6 +227,7 @@ def _build_ffmpeg_cmd(
     font_size_px: Optional[int] = None,    # overrides size_label if set
     max_duration: Optional[float] = None,  # in seconds, cuts video if set
     metadata: Optional[Dict[str, str]] = None,  # iPhone/Android spoofed metadata
+    caption_style: str = "boxed",          # "boxed" (fond noir) | "outlined" (contour)
 ) -> Tuple[List[str], Optional[Path]]:
     """
     Construit la commande FFmpeg.
@@ -246,6 +247,7 @@ def _build_ffmpeg_cmd(
                 text=caption,
                 font_size=font_size,
                 max_width=int(TARGET_W * 0.90),  # 90% du frame max
+                style=caption_style,
             )
         except Exception as e:
             logger.warning(f"Caption render failed: {e}")
@@ -424,6 +426,7 @@ def mix_batch_stream(
     position_pct: Optional[float] = None,
     font_size_px: Optional[int] = None,
     max_duration: Optional[float] = None,
+    caption_style: str = "boxed",
 ) -> Generator[Dict[str, Any], None, None]:
     """Streaming version yielding progress events."""
     if not templates or not videos:
@@ -494,6 +497,7 @@ def mix_batch_stream(
             font_size_px=font_size_px,
             max_duration=max_duration,
             metadata=spoof_meta,
+            caption_style=caption_style,
         )
         cmd_with_progress = cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:]
 
