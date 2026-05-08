@@ -116,7 +116,7 @@ async def run_mix_stream(
     position_pct: Optional[float] = Query(None),
     font_size_px: Optional[int] = Query(None),
     max_duration: Optional[float] = Query(None),
-    caption_style: str = Query("boxed"),
+    caption_style: str = Query("outlined"),
 ):
     """Stream SSE pour progression en temps réel."""
     templates = _selected_templates()
