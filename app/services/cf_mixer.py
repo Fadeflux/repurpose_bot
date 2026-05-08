@@ -200,6 +200,21 @@ def _margin_v_for_align(align: str, position_pct: Optional[float] = None) -> int
     return 0  # center : MarginV ignoré pour align=5
 
 
+def _y_pixel_for_align(align: str, position_pct: Optional[float], img_height: int) -> str:
+    """Retourne l'expression FFmpeg pour la position Y de l'overlay."""
+    if position_pct is not None:
+        pct = max(0.0, min(100.0, float(position_pct))) / 100.0
+        return f"(H-{img_height})*{pct:.4f}"
+    a = (align or "center").lower()
+    if a == "top":
+        return f"H*0.10"
+    if a == "tiktok":
+        return f"H*0.72"
+    if a == "bottom":
+        return f"H*0.85-{img_height}"
+    return f"(H-{img_height})/2"
+
+
 def _build_ffmpeg_cmd(
     video_path: str,
     caption: str,
@@ -213,47 +228,75 @@ def _build_ffmpeg_cmd(
     max_duration: Optional[float] = None,  # in seconds, cuts video if set
     metadata: Optional[Dict[str, str]] = None,  # iPhone/Android spoofed metadata
 ) -> Tuple[List[str], Optional[Path]]:
-    """Retourne (cmd, ass_path_temp) — l'appelant doit cleanup le ass_path après."""
+    """
+    Construit la commande FFmpeg.
+    Pour les captions : génère un PNG via Pillow puis overlay (emojis Apple natifs,
+    rendu pixel-précis style TikTok/Insta).
+    Retourne (cmd, png_path_temp) — l'appelant doit cleanup le png_path après.
+    """
+    from app.services import cf_caption_renderer
+
     font_size = font_size_px if font_size_px else _font_size_for_size(size_label)
 
-    if position_pct is not None:
-        align_code = 8  # top + MarginV qui descend
-        margin_v = int(TARGET_H * (max(0.0, min(100.0, position_pct)) / 100.0))
-    else:
-        align_code = _ass_align_for(align)
-        margin_v = _margin_v_for_align(align)
-
-    # Génère le fichier ASS pour la caption
-    ass_path: Optional[Path] = None
-    vf_parts = [
-        f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease",
-        f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:color=black",
-        "setsar=1",
-    ]
+    # Génère le PNG de la caption si elle existe
+    caption_png: Optional[Path] = None
     if caption and caption.strip():
-        ass_path = _build_ass_file(
-            caption=caption,
-            font_size=font_size,
-            margin_v=margin_v,
-            align_code=align_code,
-            duration_s=max_duration if max_duration and max_duration > 0 else 600.0,
-        )
-        # Le filtre subtitles veut un path ASS. On échappe les caractères spéciaux dans le path.
-        ass_path_str = str(ass_path).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-        vf_parts.append(f"subtitles='{ass_path_str}'")
+        try:
+            caption_png = cf_caption_renderer.render_caption_png(
+                text=caption,
+                font_size=font_size,
+                max_width=int(TARGET_W * 0.90),  # 90% du frame max
+            )
+        except Exception as e:
+            logger.warning(f"Caption render failed: {e}")
+            caption_png = None
 
-    vf = ",".join(vf_parts)
+    # Mesure la hauteur du PNG pour bien positionner verticalement
+    overlay_h = 0
+    if caption_png and caption_png.exists():
+        try:
+            from PIL import Image as _PILImage
+            with _PILImage.open(caption_png) as im:
+                overlay_h = im.size[1]
+        except Exception:
+            overlay_h = font_size + 40
 
     cmd: List[str] = ["ffmpeg", "-y"]
     cmd += ["-i", video_path]
-    if music_path and os.path.exists(music_path) and audio_priority != "video":
+    has_music = bool(music_path and os.path.exists(music_path) and audio_priority != "video")
+    if has_music:
         cmd += ["-i", music_path]
-    cmd += ["-vf", vf]
+    if caption_png:
+        cmd += ["-i", str(caption_png)]
 
-    if music_path and os.path.exists(music_path) and audio_priority != "video":
-        cmd += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+    # Construction du filter_complex
+    # [0:v] est la vidéo, on la scale d'abord
+    scale_chain = (
+        f"[0:v]scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease,"
+        f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:color=black,"
+        f"setsar=1[vid]"
+    )
+
+    if caption_png:
+        # Index de l'input du PNG : 1 si pas de music, sinon 2
+        png_idx = 2 if has_music else 1
+        y_expr = _y_pixel_for_align(align, position_pct, overlay_h)
+        # Overlay centré horizontalement, position Y selon align/position_pct
+        overlay_chain = f"[vid][{png_idx}:v]overlay=x=(W-w)/2:y={y_expr}[out]"
+        filter_complex = f"{scale_chain};{overlay_chain}"
+        out_label = "[out]"
     else:
-        cmd += ["-map", "0:v:0", "-map", "0:a?"]
+        filter_complex = scale_chain
+        out_label = "[vid]"
+
+    cmd += ["-filter_complex", filter_complex]
+    cmd += ["-map", out_label]
+
+    # Audio mapping
+    if has_music:
+        cmd += ["-map", "1:a:0", "-shortest"]
+    else:
+        cmd += ["-map", "0:a?"]
 
     # Cut to max_duration if set
     if max_duration and max_duration > 0:
@@ -277,7 +320,7 @@ def _build_ffmpeg_cmd(
         cmd += metadata_randomizer.metadata_to_ffmpeg_args(metadata)
 
     cmd += [str(out_path)]
-    return cmd, ass_path
+    return cmd, caption_png
 
 
 def mix_one(
