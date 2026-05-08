@@ -14,7 +14,7 @@ const state = {
     fontSizePx: 56,
     durationEnabled: false,
     durationSec: 15,
-    captionStyle: 'boxed',
+    captionStyle: 'outlined',
 };
 
 // ============ EMOJI DATA ============
@@ -1728,7 +1728,7 @@ function startMix() {
         audio_priority: state.audioPriority,
         position_pct: state.positionPct,
         font_size_px: state.fontSizePx,
-        caption_style: state.captionStyle || 'boxed',
+        caption_style: state.captionStyle || 'outlined',
     });
     if (state.durationEnabled) {
         params.append('max_duration', state.durationSec);
