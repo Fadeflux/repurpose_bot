@@ -116,6 +116,7 @@ async def run_mix_stream(
     position_pct: Optional[float] = Query(None),
     font_size_px: Optional[int] = Query(None),
     max_duration: Optional[float] = Query(None),
+    caption_style: str = Query("boxed"),
 ):
     """Stream SSE pour progression en temps réel."""
     templates = _selected_templates()
@@ -138,6 +139,7 @@ async def run_mix_stream(
                 position_pct=position_pct,
                 font_size_px=font_size_px,
                 max_duration=max_duration,
+                caption_style=caption_style,
             ):
                 if ev.get("type") == "item_done":
                     out = ev["output"]
