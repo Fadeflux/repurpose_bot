@@ -1,3 +1,4 @@
+
 """
 Rendu pixel-parfait des captions style Insta/TikTok via Pillow.
 
