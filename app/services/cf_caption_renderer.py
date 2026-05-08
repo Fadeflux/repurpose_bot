@@ -1,4 +1,3 @@
-
 """
 Rendu pixel-parfait des captions style Insta/TikTok via Pillow.
 
@@ -170,16 +169,22 @@ def render_caption_png(
     font_size: int = 56,
     max_width: int = 980,
     out_path: Optional[Path] = None,
+    style: str = "boxed",          # "boxed" = fond noir | "outlined" = contour noir
     box_alpha: int = DEFAULT_BOX_ALPHA,
     box_radius: int = DEFAULT_BOX_RADIUS,
     pad_x: int = DEFAULT_BOX_PAD_X,
     pad_y: int = DEFAULT_BOX_PAD_Y,
     line_spacing: int = DEFAULT_LINE_SPACING,
+    outline_width: int = 5,        # épaisseur du contour pour style "outlined"
 ) -> Path:
-    """Rend une caption en PNG RGBA, retourne le path."""
+    """Rend une caption en PNG RGBA, retourne le path.
+
+    style="boxed"   → fond noir arrondi semi-transparent + texte blanc (TikTok)
+    style="outlined" → texte blanc avec contour noir épais (style Insta/captions)
+    """
     text_font_path = _get_text_font_path()
     text_font = ImageFont.truetype(text_font_path, font_size)
-    emoji_size = int(font_size * 1.15)  # un peu plus gros que le texte pour matcher
+    emoji_size = int(font_size * 1.15)
 
     # ---------- Étape 1 : tokenize + word-wrap ----------
     tmp = Image.new("RGBA", (1, 1))
@@ -241,42 +246,59 @@ def render_caption_png(
         line_metrics.append((lw, line))
 
     max_line_w = max(lw for lw, _ in line_metrics)
-    total_w = max_line_w + 2 * pad_x
+
+    # Padding différent selon le style
+    if style == "outlined":
+        # Pas de box, juste de la marge pour le contour qui dépasse
+        actual_pad_x = outline_width + 4
+        actual_pad_y = outline_width + 4
+    else:
+        actual_pad_x = pad_x
+        actual_pad_y = pad_y
+
+    total_w = max_line_w + 2 * actual_pad_x
     total_h = (
         len(line_metrics) * line_height
-        + 2 * pad_y
+        + 2 * actual_pad_y
         + (len(line_metrics) - 1) * line_spacing
     )
 
-    # ---------- Étape 3 : crée canvas + dessine box noire ----------
+    # ---------- Étape 3 : crée canvas + box noire (si style boxed) ----------
     img = Image.new("RGBA", (total_w, total_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img, "RGBA")
 
-    draw.rounded_rectangle(
-        (0, 0, total_w, total_h),
-        radius=box_radius,
-        fill=(0, 0, 0, box_alpha),
-    )
+    if style == "boxed":
+        draw.rounded_rectangle(
+            (0, 0, total_w, total_h),
+            radius=box_radius,
+            fill=(0, 0, 0, box_alpha),
+        )
 
     # ---------- Étape 4 : dessine chaque ligne ----------
-    y = pad_y
+    y = actual_pad_y
     for lw, line in line_metrics:
         x = (total_w - lw) // 2
         for kind, val in line:
             if kind == "emoji":
                 emoji_img = _render_emoji_to_image(val, emoji_size)
                 if emoji_img:
-                    # Center vertical sur la ligne
                     ey = y + (line_height - emoji_img.size[1]) // 2
                     img.paste(emoji_img, (x, ey), emoji_img)
                     x += emoji_img.size[0]
                 else:
-                    # Fallback texte si emoji rendering fail
-                    draw.text((x, y), val, font=text_font, fill=(255, 255, 255, 255))
+                    if style == "outlined":
+                        draw.text((x, y), val, font=text_font, fill=(255, 255, 255, 255),
+                                  stroke_width=outline_width, stroke_fill=(0, 0, 0, 255))
+                    else:
+                        draw.text((x, y), val, font=text_font, fill=(255, 255, 255, 255))
                     x += emoji_size
             else:
-                # Texte blanc
-                draw.text((x, y), val, font=text_font, fill=(255, 255, 255, 255))
+                # Texte : avec ou sans contour selon le style
+                if style == "outlined":
+                    draw.text((x, y), val, font=text_font, fill=(255, 255, 255, 255),
+                              stroke_width=outline_width, stroke_fill=(0, 0, 0, 255))
+                else:
+                    draw.text((x, y), val, font=text_font, fill=(255, 255, 255, 255))
                 x += text_width(val)
         y += line_height + line_spacing
 
