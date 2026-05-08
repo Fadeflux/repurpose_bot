@@ -495,9 +495,15 @@ def mix_batch_stream(
 
             proc.wait(timeout=600)
             if proc.returncode != 0:
-                err = (proc.stderr.read() if proc.stderr else "")[-300:]
-                yield {"type": "log", "level": "ERROR", "message": f"FFmpeg fail: {err.strip()[:120]}"}
-                yield {"type": "item_error", "index": item_idx, "error": err}
+                err = (proc.stderr.read() if proc.stderr else "")
+                # Log COMPLET côté serveur pour qu'on puisse débugger via Railway logs
+                logger.error(f"FFmpeg failed (returncode={proc.returncode}) for variant {item_idx}")
+                logger.error(f"Command was: {' '.join(cmd_with_progress)}")
+                logger.error(f"FFmpeg stderr (full):\n{err}")
+                # Envoie un résumé court côté UI
+                short_err = err.strip()[-300:].replace("\n", " | ")
+                yield {"type": "log", "level": "ERROR", "message": f"FFmpeg fail: {short_err[:200]}"}
+                yield {"type": "item_error", "index": item_idx, "error": err[-500:]}
                 # cleanup ASS even on error
                 if ass_path and ass_path.exists():
                     try: ass_path.unlink()
