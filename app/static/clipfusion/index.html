@@ -576,6 +576,28 @@
             <div id="selected-templates-list" class="selected-list"></div>
         </div>
         <div id="mix-results" class="grid-list"></div>
+
+        <!-- Gestion des VA (emails Drive) -->
+        <details class="card va-admin-card" style="margin-top: 24px;">
+            <summary class="va-admin-summary">
+                <span class="card-label" style="margin:0;">⚙️ GESTION DES VA (EMAILS DRIVE)</span>
+                <span class="muted small">Renseigne l'email Gmail de chaque VA pour le partage Drive automatique</span>
+            </summary>
+            <div class="va-admin-body">
+                <p class="muted small" style="margin-bottom: 14px;">
+                    Quand un VA quitte Discord, son email est supprimé automatiquement à la prochaine sync.
+                    Click 🔄 pour resync depuis Discord.
+                </p>
+                <div class="va-admin-toolbar">
+                    <span class="muted small" style="text-transform:uppercase; letter-spacing:0.06em;">Filtrer :</span>
+                    <button class="btn-mini-action va-filter-btn active" data-team="all">Tous</button>
+                    <button class="btn-mini-action va-filter-btn" data-team="geelark">Geelark</button>
+                    <button class="btn-mini-action va-filter-btn" data-team="instagram">Instagram</button>
+                    <button class="btn-mini-action" id="va-admin-resync" style="margin-left:auto;">🔄 Resync</button>
+                </div>
+                <div id="va-admin-list" class="va-admin-list"></div>
+            </div>
+        </details>
     </section>
 
     </main>

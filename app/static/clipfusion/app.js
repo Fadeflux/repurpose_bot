@@ -2006,6 +2006,118 @@ function getSpoofPayload() {
     return { enabled_filters: enabled, custom_ranges: ranges };
 }
 
+// ============ VA ADMIN (gestion emails Drive) ============
+async function loadVAAdminList() {
+    const list = document.getElementById('va-admin-list');
+    if (!list) return;
+    try {
+        const res = await fetch(API + '/list-vas-admin');
+        const data = await res.json();
+        const vas = data.vas || [];
+        renderVAAdminList(vas);
+    } catch (e) {
+        list.innerHTML = '<div class="muted small">Erreur de chargement</div>';
+    }
+}
+
+function renderVAAdminList(vas) {
+    const list = document.getElementById('va-admin-list');
+    list.innerHTML = '';
+    if (!vas || vas.length === 0) {
+        list.innerHTML = '<div class="muted small">Aucun VA dans le cache. Click 🔄 Resync pour récupérer depuis Discord.</div>';
+        return;
+    }
+    vas.forEach(v => {
+        const row = document.createElement('div');
+        row.className = 'va-admin-row';
+        row.dataset.team = v.team || '';
+        row.innerHTML = `
+            <div class="va-admin-name">
+                ${escapeHtml(v.name)}
+                <span class="va-admin-team-badge">${escapeHtml(v.team || '—')}</span>
+            </div>
+            <input type="email" class="va-admin-email" placeholder="email@gmail.com"
+                   value="${escapeHtml(v.email || '')}"
+                   data-discord-id="${escapeHtml(v.discord_id)}">
+            <button class="va-admin-save">💾 Save</button>
+            <span class="va-admin-status"></span>
+        `;
+        list.appendChild(row);
+
+        const saveBtn = row.querySelector('.va-admin-save');
+        const input = row.querySelector('.va-admin-email');
+        const status = row.querySelector('.va-admin-status');
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.classList.add('saving');
+            status.className = 'va-admin-status';
+            status.textContent = '…';
+            try {
+                const fd = new FormData();
+                fd.append('discord_id', input.dataset.discordId);
+                fd.append('email', input.value.trim());
+                const r = await fetch(API + '/save-va-email', { method: 'POST', body: fd });
+                const data = await r.json();
+                if (data.ok) {
+                    status.className = 'va-admin-status ok';
+                    status.textContent = '✓ saved';
+                    setTimeout(() => { status.textContent = ''; }, 2000);
+                } else {
+                    status.className = 'va-admin-status err';
+                    status.textContent = '✗ ' + (data.error || 'error').slice(0, 30);
+                }
+            } catch (e) {
+                status.className = 'va-admin-status err';
+                status.textContent = '✗ network';
+            } finally {
+                saveBtn.classList.remove('saving');
+            }
+        });
+    });
+    // Réapplique le filtre actif
+    const activeFilter = document.querySelector('.va-filter-btn.active');
+    if (activeFilter) applyVAFilter(activeFilter.dataset.team);
+}
+
+function applyVAFilter(team) {
+    document.querySelectorAll('.va-admin-row').forEach(row => {
+        if (team === 'all') {
+            row.style.display = 'flex';
+        } else {
+            row.style.display = row.dataset.team === team ? 'flex' : 'none';
+        }
+    });
+}
+
+document.querySelectorAll('.va-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.va-filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        applyVAFilter(btn.dataset.team);
+    });
+});
+
+document.getElementById('va-admin-resync')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = '🔄 Sync...';
+    try {
+        const r = await fetch(API + '/resync-vas', { method: 'POST' });
+        const data = await r.json();
+        if (data.ok) {
+            toast(`✓ Resync : ${data.total || 0} VA(s)`);
+            await loadVAAdminList();
+            await loadVAs();  // refresh aussi le selecteur dans la card destination
+        } else {
+            toast('Resync échouée: ' + (data.error || ''), true);
+        }
+    } catch (e) {
+        toast('Resync error: ' + e.message, true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔄 Resync';
+    }
+});
+
 // ============ DESTINATION (Équipe + VA + Device) ============
 async function loadVAs() {
     try {
@@ -2081,4 +2193,5 @@ syncSizeButtons();
 // Initial load
 refreshAll();
 loadVAs();
+loadVAAdminList();
 renderSpoofGrid();

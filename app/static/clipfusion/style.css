@@ -2172,3 +2172,115 @@ kbd {
     border-color: var(--cyan);
     color: var(--cyan);
 }
+
+/* ======== VA Admin (gestion emails Drive) ======== */
+.va-admin-card {
+    margin-top: 24px;
+}
+.va-admin-summary {
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    gap: 16px;
+}
+.va-admin-summary::-webkit-details-marker { display: none; }
+.va-admin-summary::before {
+    content: "▸";
+    font-size: 11px;
+    color: var(--text-faint);
+    transition: transform 0.15s ease;
+    margin-right: 6px;
+}
+.va-admin-card[open] .va-admin-summary::before {
+    transform: rotate(90deg);
+}
+.va-admin-body { margin-top: 14px; }
+.va-admin-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+.va-filter-btn.active {
+    background: var(--cyan-soft);
+    border-color: var(--cyan);
+    color: var(--text);
+}
+.va-admin-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.va-admin-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 12px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    transition: border-color var(--t-fast);
+}
+.va-admin-row:hover {
+    border-color: var(--border-hover);
+}
+.va-admin-name {
+    min-width: 160px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.va-admin-team-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    background: var(--cyan-soft);
+    color: var(--cyan);
+    border-radius: 4px;
+    text-transform: lowercase;
+    font-weight: 500;
+}
+.va-admin-email {
+    flex: 1;
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 7px 11px;
+    font-size: 13px;
+    transition: border-color var(--t-fast);
+}
+.va-admin-email:focus {
+    outline: none;
+    border-color: var(--cyan);
+}
+.va-admin-save {
+    background: var(--bg-card);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 7px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--t-fast);
+}
+.va-admin-save:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
+.va-admin-save.saving { opacity: 0.6; pointer-events: none; }
+.va-admin-status {
+    font-size: 11px;
+    min-width: 60px;
+    text-align: right;
+}
+.va-admin-status.ok { color: var(--green); }
+.va-admin-status.err { color: var(--red); }
