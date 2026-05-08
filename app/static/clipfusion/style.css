@@ -1992,3 +1992,28 @@ kbd {
     box-shadow: 0 8px 24px var(--cyan-glow);
 }
 .card.dragover-card { position: relative; }
+
+/* Boutons de style caption (boxed/outlined) — partage le même look que audio-btn */
+.caption-style-btn {
+    flex: 1;
+    background: var(--bg-card);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--t-fast);
+}
+.caption-style-btn:hover {
+    border-color: var(--border-hover);
+    color: var(--text);
+    background: var(--bg-card-hover);
+}
+.caption-style-btn.active {
+    border-color: var(--cyan);
+    color: var(--text);
+    background: var(--cyan-soft);
+    box-shadow: 0 0 0 1px var(--cyan-soft);
+}

@@ -14,6 +14,7 @@ const state = {
     fontSizePx: 56,
     durationEnabled: false,
     durationSec: 15,
+    captionStyle: 'boxed',
 };
 
 // ============ EMOJI DATA ============
@@ -105,6 +106,13 @@ document.querySelectorAll('.audio-btn').forEach(b => {
         b.classList.add('active');
         state.audioPriority = b.dataset.audio;
         refreshMixCounts();
+    });
+});
+document.querySelectorAll('.caption-style-btn').forEach(b => {
+    b.addEventListener('click', () => {
+        document.querySelectorAll('.caption-style-btn').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        state.captionStyle = b.dataset.style;
     });
 });
 document.querySelectorAll('.size-btn').forEach(b => {
@@ -1720,6 +1728,7 @@ function startMix() {
         audio_priority: state.audioPriority,
         position_pct: state.positionPct,
         font_size_px: state.fontSizePx,
+        caption_style: state.captionStyle || 'boxed',
     });
     if (state.durationEnabled) {
         params.append('max_duration', state.durationSec);
