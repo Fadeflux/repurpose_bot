@@ -58,7 +58,7 @@ body {
     background-attachment: fixed;
     color: var(--text);
     min-height: 100vh;
-    padding: 20px 20px 100px;
+    padding: 20px 20px 160px;
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
