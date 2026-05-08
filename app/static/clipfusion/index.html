@@ -487,6 +487,22 @@
             </div>
         </div>
 
+        <!-- Row Paramètres de spoof : grille de filtres avec min/max -->
+        <details class="card spoof-card" open>
+            <summary class="spoof-summary">
+                <span class="card-label" style="margin:0;">⚙️ PARAMÈTRES DE SPOOF</span>
+                <span class="muted small">Min / Max appliqués aléatoirement à chaque variante</span>
+            </summary>
+            <div class="spoof-grid" id="spoof-grid">
+                <!-- Rempli par JS au chargement (cf renderSpoofGrid) -->
+            </div>
+            <div class="spoof-actions">
+                <button class="btn-mini-action" id="spoof-reset">↻ Reset défauts</button>
+                <button class="btn-mini-action" id="spoof-disable-all">☐ Tout désactiver</button>
+                <button class="btn-mini-action" id="spoof-enable-all">☑ Tout activer</button>
+            </div>
+        </details>
+
         <!-- Row 2: priorité audio + caption position/taille -->
         <div class="mix-row">
             <div class="card">

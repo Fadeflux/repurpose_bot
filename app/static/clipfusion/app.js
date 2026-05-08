@@ -19,6 +19,21 @@ const state = {
     selectedTeam: 'geelark',
     selectedDevice: 'smart_mix',
     vasByTeam: { geelark: [], instagram: [] },
+    spoof: {
+        // key -> { enabled, min, max, default_min, default_max, step, label, isInt }
+        bitrate:    { enabled: true, min: 8000,  max: 12000, default_min: 8000,  default_max: 12000, step: 100,    label: 'Video Bitrate', isInt: true },
+        brightness: { enabled: true, min: -0.05, max: 0.05,  default_min: -0.05, default_max: 0.05,  step: 0.01,   label: 'Brightness',    isInt: false },
+        contrast:   { enabled: true, min: 0.95,  max: 1.10,  default_min: 0.95,  default_max: 1.10,  step: 0.01,   label: 'Contrast',      isInt: false },
+        saturation: { enabled: true, min: 0.95,  max: 1.15,  default_min: 0.95,  default_max: 1.15,  step: 0.01,   label: 'Saturation',    isInt: false },
+        gamma:      { enabled: true, min: 0.95,  max: 1.05,  default_min: 0.95,  default_max: 1.05,  step: 0.01,   label: 'Gamma',         isInt: false },
+        speed:      { enabled: true, min: 1.03,  max: 1.04,  default_min: 1.03,  default_max: 1.04,  step: 0.01,   label: 'Speed',         isInt: false },
+        zoom:       { enabled: true, min: 1.03,  max: 1.06,  default_min: 1.03,  default_max: 1.06,  step: 0.01,   label: 'Zoom',          isInt: false },
+        noise:      { enabled: true, min: 5,     max: 15,    default_min: 5,     default_max: 15,    step: 1,      label: 'Noise',         isInt: true },
+        vignette:   { enabled: true, min: 0.20,  max: 0.40,  default_min: 0.20,  default_max: 0.40,  step: 0.05,   label: 'Vignette',      isInt: false },
+        rotation:   { enabled: true, min: -0.5,  max: 0.5,   default_min: -0.5,  default_max: 0.5,   step: 0.1,    label: 'Rotation',      isInt: false },
+        cut_start:  { enabled: true, min: 0.10,  max: 0.15,  default_min: 0.10,  default_max: 0.15,  step: 0.05,   label: 'Cut Start',     isInt: false },
+        cut_end:    { enabled: true, min: 0.10,  max: 0.15,  default_min: 0.10,  default_max: 0.15,  step: 0.05,   label: 'Cut End',       isInt: false },
+    },
 };
 
 // ============ EMOJI DATA ============
@@ -1726,6 +1741,7 @@ function startMix() {
     launch.classList.add('mixing');
     launch.textContent = '…';
 
+    const spoofPayload = getSpoofPayload();
     const params = new URLSearchParams({
         max_variants: state.maxVariants,
         size_label: state.sizeLabel,
@@ -1736,6 +1752,8 @@ function startMix() {
         device_choice: state.selectedDevice || 'smart_mix',
         va_name: state.selectedVA || '',
         team: state.selectedTeam || '',
+        enabled_filters: JSON.stringify(spoofPayload.enabled_filters),
+        custom_ranges: JSON.stringify(spoofPayload.custom_ranges),
     });
     if (state.durationEnabled) {
         params.append('max_duration', state.durationSec);
@@ -1914,6 +1932,80 @@ async function refreshAll() {
     await Promise.all([refreshTemplates(), refreshVideos(), refreshMusic(), refreshMixCounts()]);
 }
 
+// ============ SPOOF PARAMS GRID (étape 5 Mix) ============
+function renderSpoofGrid() {
+    const grid = document.getElementById('spoof-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    Object.entries(state.spoof).forEach(([key, p]) => {
+        const item = document.createElement('div');
+        item.className = 'spoof-item' + (p.enabled ? '' : ' disabled');
+        const stepStr = p.step;
+        item.innerHTML = `
+            <div class="spoof-item-header">
+                <input type="checkbox" id="sp-en-${key}" ${p.enabled ? 'checked' : ''}>
+                <label for="sp-en-${key}">${escapeHtml(p.label)}</label>
+            </div>
+            <div class="spoof-inputs">
+                <span>Min</span>
+                <input type="number" id="sp-min-${key}" value="${p.min}" step="${stepStr}">
+                <span>Max</span>
+                <input type="number" id="sp-max-${key}" value="${p.max}" step="${stepStr}">
+            </div>
+        `;
+        grid.appendChild(item);
+
+        const cb = item.querySelector(`#sp-en-${key}`);
+        cb.addEventListener('change', () => {
+            p.enabled = cb.checked;
+            item.classList.toggle('disabled', !cb.checked);
+        });
+        const minInp = item.querySelector(`#sp-min-${key}`);
+        const maxInp = item.querySelector(`#sp-max-${key}`);
+        minInp.addEventListener('input', () => {
+            const val = parseFloat(minInp.value);
+            if (!isNaN(val)) p.min = p.isInt ? Math.round(val) : val;
+        });
+        maxInp.addEventListener('input', () => {
+            const val = parseFloat(maxInp.value);
+            if (!isNaN(val)) p.max = p.isInt ? Math.round(val) : val;
+        });
+    });
+}
+
+document.getElementById('spoof-reset')?.addEventListener('click', () => {
+    Object.values(state.spoof).forEach(p => {
+        p.enabled = true;
+        p.min = p.default_min;
+        p.max = p.default_max;
+    });
+    renderSpoofGrid();
+    toast('↻ Paramètres remis aux valeurs par défaut');
+});
+document.getElementById('spoof-disable-all')?.addEventListener('click', () => {
+    Object.values(state.spoof).forEach(p => { p.enabled = false; });
+    renderSpoofGrid();
+});
+document.getElementById('spoof-enable-all')?.addEventListener('click', () => {
+    Object.values(state.spoof).forEach(p => { p.enabled = true; });
+    renderSpoofGrid();
+});
+
+function getSpoofPayload() {
+    // Construit { enabled_filters: [...], custom_ranges: {...} } pour l'API
+    const enabled = [];
+    const ranges = {};
+    Object.entries(state.spoof).forEach(([key, p]) => {
+        if (!p.enabled) return;
+        enabled.push(key);
+        // Sécurité : min <= max
+        const lo = Math.min(p.min, p.max);
+        const hi = Math.max(p.min, p.max);
+        ranges[key] = [lo, hi];
+    });
+    return { enabled_filters: enabled, custom_ranges: ranges };
+}
+
 // ============ DESTINATION (Équipe + VA + Device) ============
 async function loadVAs() {
     try {
@@ -1989,3 +2081,4 @@ syncSizeButtons();
 // Initial load
 refreshAll();
 loadVAs();
+renderSpoofGrid();

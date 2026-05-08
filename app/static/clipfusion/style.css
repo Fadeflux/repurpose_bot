@@ -2070,3 +2070,105 @@ kbd {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
+
+/* Spoof params grid (étape 5 Mix) */
+.spoof-card {
+    margin-top: 12px;
+}
+.spoof-summary {
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    gap: 16px;
+}
+.spoof-summary::-webkit-details-marker { display: none; }
+.spoof-summary::before {
+    content: "▸";
+    font-size: 11px;
+    color: var(--text-faint);
+    transition: transform 0.15s ease;
+    margin-right: 6px;
+}
+.spoof-card[open] .spoof-summary::before {
+    transform: rotate(90deg);
+}
+.spoof-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+}
+.spoof-item {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 10px 12px;
+    transition: all var(--t-fast);
+}
+.spoof-item.disabled {
+    opacity: 0.45;
+}
+.spoof-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.spoof-item-header input[type="checkbox"] {
+    accent-color: var(--cyan);
+    cursor: pointer;
+}
+.spoof-item-header label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    text-transform: capitalize;
+}
+.spoof-inputs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.spoof-inputs span {
+    font-size: 11px;
+    color: var(--text-faint);
+}
+.spoof-inputs input[type="number"] {
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 6px;
+    width: 60px;
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
+}
+.spoof-inputs input[type="number"]:focus {
+    outline: none;
+    border-color: var(--cyan);
+}
+.spoof-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+.btn-mini-action {
+    background: var(--bg-card);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 5px 11px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all var(--t-fast);
+}
+.btn-mini-action:hover {
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
