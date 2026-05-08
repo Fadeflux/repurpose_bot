@@ -426,7 +426,10 @@ def mix_batch_stream(
     position_pct: Optional[float] = None,
     font_size_px: Optional[int] = None,
     max_duration: Optional[float] = None,
-    caption_style: str = "boxed",
+    caption_style: str = "outlined",
+    device_choice: str = "smart_mix",
+    va_name: str = "",
+    team: str = "",
 ) -> Generator[Dict[str, Any], None, None]:
     """Streaming version yielding progress events."""
     if not templates or not videos:
@@ -485,7 +488,7 @@ def mix_batch_stream(
         duration = _get_video_duration(vid["path"]) or 1.0
 
         # Generate randomized iPhone/Android metadata for THIS variant (unique per output)
-        spoof_meta = metadata_randomizer.random_metadata("mix_random")
+        spoof_meta = metadata_randomizer.random_metadata(device_choice or "mix_random")
         platform_label = "iPhone" if spoof_meta.get("_platform") == "iphone" else "Android"
         device_label = spoof_meta.get("model", "?")
         yield {"type": "log", "level": "INFO", "message": f"Spoofing as {platform_label} {device_label}"}
@@ -589,24 +592,26 @@ def mix_batch_stream(
     total_elapsed = time.time() - started
     yield {"type": "log", "level": "INFO", "message": f"Mix terminé · {len(output_metas)}/{total} OK · {round(total_elapsed,1)}s"}
 
-    # ===== DRIVE UPLOAD (si configuré) =====
-    # Réutilise le drive_service complet de Repurpose Bot (avec retry, OAuth, SA, etc.)
+    # ===== DRIVE UPLOAD + VA SHARE + DISCORD (si configuré) =====
     drive_info: Optional[Dict[str, Any]] = None
     if output_metas:
         try:
             from app.services import drive_service
             if drive_service.is_drive_enabled():
                 from datetime import datetime
-                folder_name = f"ClipFusion_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(output_metas)}vids"
+                # Nom du dossier : inclut le VA si fourni
+                date_part = datetime.now().strftime('%Y%m%d_%H%M%S')
+                if va_name:
+                    folder_name = f"ClipFusion_{va_name}_{date_part}_{len(output_metas)}vids"
+                else:
+                    folder_name = f"ClipFusion_{date_part}_{len(output_metas)}vids"
                 yield {"type": "log", "level": "INFO", "message": f"📤 Drive: création dossier {folder_name}"}
 
-                # create_batch_folder retourne juste un folder_id (string) dans Repurpose
                 folder_id = drive_service.create_batch_folder(folder_name)
                 if folder_id:
                     folder_url = drive_service.get_folder_link(folder_id)
                     yield {"type": "log", "level": "INFO", "message": f"📁 Drive folder: {folder_url}"}
 
-                    # Upload (Repurpose drive_service.upload_file gère déjà retry 3x)
                     uploaded_count = 0
                     for i, m in enumerate(output_metas, 1):
                         try:
@@ -630,10 +635,85 @@ def mix_batch_stream(
                         "total": len(output_metas),
                     }
                     yield {"type": "log", "level": "INFO", "message": f"✓ Drive: {uploaded_count}/{len(output_metas)} uploaded"}
+
+                    # ===== VA SHARING + DISCORD NOTIFS (réutilise pipeline Repurpose) =====
+                    va_email = None
+                    va_discord_id = None
+                    if va_name:
+                        try:
+                            from app.services.discord_va_sync import find_va_by_discord_id, find_va_discord_id
+                            va_discord_id = find_va_discord_id(va_name)
+                            va_info = find_va_by_discord_id(va_discord_id) if va_discord_id else None
+                            va_email = va_info.get("email") if va_info else None
+
+                            # Fallback Postgres si pas en cache
+                            if not va_email and va_discord_id:
+                                from app.services.va_emails_db import load_all_emails, is_db_enabled as va_db_enabled
+                                if va_db_enabled():
+                                    db_emails = load_all_emails()
+                                    va_email = db_emails.get(str(va_discord_id))
+                        except Exception as e:
+                            logger.warning(f"Lookup VA email échoué: {e}")
+
+                    if va_email:
+                        try:
+                            yield {"type": "log", "level": "INFO", "message": f"👥 Partage Drive avec {va_email}"}
+                            share_result = drive_service.share_folder_with_users(folder_id, [va_email], role="writer")
+                            ok_count = len(share_result.get("success", []))
+                            yield {"type": "log", "level": "INFO", "message": f"✓ Partagé avec {ok_count} VA(s)"}
+                            drive_info["shared_with"] = [va_email]
+                        except Exception as e:
+                            yield {"type": "log", "level": "WARN", "message": f"Partage VA échoué: {e}"}
+                    elif va_name:
+                        yield {"type": "log", "level": "WARN", "message": f"Pas d'email enregistré pour {va_name}, partage auto skip"}
+
+                    # DM Discord au VA + notif équipe
+                    if va_discord_id and va_email:
+                        try:
+                            import asyncio
+                            from app.services.discord_bot import (
+                                notify_va_drive_ready,
+                                send_batch_notification_via_bot,
+                                is_bot_enabled,
+                            )
+                            if is_bot_enabled():
+                                # On lance les coroutines en async background
+                                async def _send_notifs():
+                                    try:
+                                        await notify_va_drive_ready(va_discord_id, folder_url or "")
+                                    except Exception as e:
+                                        logger.warning(f"DM VA échoué: {e}")
+                                    try:
+                                        await send_batch_notification_via_bot(
+                                            team=team or "geelark",
+                                            va_name=va_name,
+                                            va_discord_id=va_discord_id or "",
+                                            batch_name=folder_name,
+                                            total_requested=len(output_metas),
+                                            succeeded=uploaded_count,
+                                            failed=len(output_metas) - uploaded_count,
+                                            drive_uploaded=uploaded_count,
+                                            retries_used=0,
+                                            duration_seconds=total_elapsed,
+                                            drive_url=folder_url or "",
+                                        )
+                                    except Exception as e:
+                                        logger.warning(f"Notif équipe échouée: {e}")
+
+                                # Run in background thread (we are in a sync generator)
+                                try:
+                                    loop = asyncio.new_event_loop()
+                                    loop.run_until_complete(_send_notifs())
+                                    loop.close()
+                                    yield {"type": "log", "level": "INFO", "message": f"💬 Discord notifié ({team or 'geelark'})"}
+                                except Exception as e:
+                                    logger.warning(f"Async loop notif échoué: {e}")
+                        except Exception as e:
+                            yield {"type": "log", "level": "WARN", "message": f"Discord notif skipped: {e}"}
+
                 else:
                     yield {"type": "log", "level": "WARN", "message": "Drive folder creation failed"}
             else:
-                # Drive pas configuré — silencieux
                 pass
         except Exception as drive_err:
             logger.warning(f"Drive step failed: {drive_err}")
