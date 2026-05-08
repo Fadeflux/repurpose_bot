@@ -31,6 +31,123 @@ TARGET_W = 1080
 TARGET_H = 1920
 
 
+# ============================================================================
+# SPOOF VIDEO PARAMS (alignés sur Repurpose Bot — bornes par défaut min/max)
+# ============================================================================
+# Ces plages sont identiques à PARAM_RANGES de Repurpose. On les redéfinit ici
+# pour pas créer de couplage dur entre les 2 modules (ClipFusion peut évoluer
+# indépendamment si besoin).
+SPOOF_RANGES: Dict[str, Tuple[float, float]] = {
+    "bitrate":    (8000, 12000),
+    "brightness": (-0.05, 0.05),
+    "contrast":   (0.95, 1.10),
+    "saturation": (0.95, 1.15),
+    "gamma":      (0.95, 1.05),
+    "speed":      (1.03, 1.04),
+    "zoom":       (1.03, 1.06),
+    "noise":      (5, 15),
+    "vignette":   (0.20, 0.40),
+    "rotation":   (-0.5, 0.5),
+    "cut_start":  (0.1, 0.15),
+    "cut_end":    (0.1, 0.15),
+}
+SPOOF_INT_KEYS = {"bitrate", "noise"}
+
+
+def _random_spoof_params(
+    enabled_filters: Optional[List[str]] = None,
+    custom_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
+) -> Dict[str, Optional[float]]:
+    """
+    Tire un set de paramètres aléatoires dans les bornes (similaire à Repurpose).
+
+    enabled_filters : liste de clés activées (les autres → None = filtre skip)
+    custom_ranges : surcharge des bornes par défaut, ex {"speed": (1.05, 1.10)}
+    """
+    out: Dict[str, Optional[float]] = {}
+    for key, default_range in SPOOF_RANGES.items():
+        if enabled_filters is not None and key not in enabled_filters:
+            out[key] = None
+            continue
+        lo, hi = default_range
+        if custom_ranges and key in custom_ranges:
+            lo, hi = custom_ranges[key]
+            if lo > hi:
+                lo, hi = hi, lo
+        if key in SPOOF_INT_KEYS:
+            out[key] = random.randint(int(lo), int(hi))
+        else:
+            out[key] = round(random.uniform(lo, hi), 4)
+    return out
+
+
+def _build_video_spoof_chain(params: Dict[str, Optional[float]]) -> List[str]:
+    """
+    Construit la liste de filtres FFmpeg appliqués à [0:v] pour spoof la vidéo
+    (indépendant de la caption overlay et du scale initial).
+    Retourne une liste de filtres à concaténer dans le filter_complex.
+    """
+    chain: List[str] = []
+
+    # Zoom (crop puis rescale)
+    zoom = params.get("zoom")
+    if zoom is not None and zoom > 1.0:
+        crop_w = int(TARGET_W / zoom)
+        crop_h = int(TARGET_H / zoom)
+        crop_w -= crop_w % 2
+        crop_h -= crop_h % 2
+        chain.append(f"crop={crop_w}:{crop_h}")
+        chain.append(f"scale={TARGET_W}:{TARGET_H}:flags=lanczos")
+        chain.append("setsar=1:1")
+
+    # Rotation (très subtile, ±0.5 degrés)
+    rotation = params.get("rotation")
+    if rotation is not None and abs(rotation) > 0.001:
+        rot_rad = rotation * 3.141592653589793 / 180.0
+        chain.append(f"rotate={rot_rad}:ow=rotw({rot_rad}):oh=roth({rot_rad}):c=black")
+        chain.append(f"crop={TARGET_W}:{TARGET_H}")
+        chain.append("setsar=1:1")
+
+    # eq : brightness, contrast, saturation, gamma
+    eq_parts = []
+    if params.get("brightness") is not None:
+        eq_parts.append(f"brightness={params['brightness']}")
+    if params.get("contrast") is not None:
+        eq_parts.append(f"contrast={params['contrast']}")
+    if params.get("saturation") is not None:
+        eq_parts.append(f"saturation={params['saturation']}")
+    if params.get("gamma") is not None:
+        eq_parts.append(f"gamma={params['gamma']}")
+    if eq_parts:
+        chain.append("eq=" + ":".join(eq_parts))
+
+    # Noise
+    noise = params.get("noise")
+    if noise is not None and noise > 0:
+        chain.append(f"noise=alls={int(noise)}:allf=t")
+
+    # Vignette
+    vignette = params.get("vignette")
+    if vignette is not None and vignette > 0:
+        chain.append(f"vignette=angle={vignette}")
+
+    # Speed (PTS)
+    speed = params.get("speed")
+    if speed is not None and abs(speed - 1.0) > 0.001:
+        pts_factor = round(1.0 / speed, 6)
+        chain.append(f"setpts={pts_factor}*PTS")
+
+    return chain
+
+
+def _build_audio_spoof_filter(params: Dict[str, Optional[float]]) -> Optional[str]:
+    """Filtre audio pour ajuster la vitesse (atempo)."""
+    speed = params.get("speed")
+    if speed is None or abs(speed - 1.0) < 0.001:
+        return None
+    return f"atempo={speed}"
+
+
 def _escape_drawtext(text: str) -> str:
     """Escape text for FFmpeg drawtext filter."""
     if not text:
@@ -227,33 +344,36 @@ def _build_ffmpeg_cmd(
     font_size_px: Optional[int] = None,    # overrides size_label if set
     max_duration: Optional[float] = None,  # in seconds, cuts video if set
     metadata: Optional[Dict[str, str]] = None,  # iPhone/Android spoofed metadata
-    caption_style: str = "boxed",          # "boxed" (fond noir) | "outlined" (contour)
+    caption_style: str = "outlined",       # "boxed" | "outlined"
+    spoof_params: Optional[Dict[str, Optional[float]]] = None,  # video spoof filters
 ) -> Tuple[List[str], Optional[Path]]:
     """
     Construit la commande FFmpeg.
     Pour les captions : génère un PNG via Pillow puis overlay (emojis Apple natifs,
     rendu pixel-précis style TikTok/Insta).
+    Pour le spoof vidéo : applique brightness/contrast/saturation/zoom/etc si
+    spoof_params est fourni (alignés sur Repurpose Bot).
     Retourne (cmd, png_path_temp) — l'appelant doit cleanup le png_path après.
     """
     from app.services import cf_caption_renderer
 
     font_size = font_size_px if font_size_px else _font_size_for_size(size_label)
 
-    # Génère le PNG de la caption si elle existe
+    # ===== Génère le PNG de la caption si elle existe =====
     caption_png: Optional[Path] = None
     if caption and caption.strip():
         try:
             caption_png = cf_caption_renderer.render_caption_png(
                 text=caption,
                 font_size=font_size,
-                max_width=int(TARGET_W * 0.90),  # 90% du frame max
+                max_width=int(TARGET_W * 0.90),
                 style=caption_style,
             )
         except Exception as e:
             logger.warning(f"Caption render failed: {e}")
             caption_png = None
 
-    # Mesure la hauteur du PNG pour bien positionner verticalement
+    # Mesure la hauteur du PNG pour positionner verticalement
     overlay_h = 0
     if caption_png and caption_png.exists():
         try:
@@ -263,7 +383,21 @@ def _build_ffmpeg_cmd(
         except Exception:
             overlay_h = font_size + 40
 
+    # ===== Spoof params (cuts en input args, le reste en filtre) =====
+    cut_start = 0.0
+    cut_end = 0.0
+    bitrate_kbps = 10000  # défaut
+    if spoof_params:
+        cut_start = float(spoof_params.get("cut_start") or 0.0)
+        cut_end = float(spoof_params.get("cut_end") or 0.0)
+        bitrate_kbps = int(spoof_params.get("bitrate") or 10000)
+
     cmd: List[str] = ["ffmpeg", "-y"]
+
+    # Cut start — appliqué à l'input pour économiser des frames
+    if cut_start > 0:
+        cmd += ["-ss", f"{cut_start:.3f}"]
+
     cmd += ["-i", video_path]
     has_music = bool(music_path and os.path.exists(music_path) and audio_priority != "video")
     if has_music:
@@ -271,53 +405,90 @@ def _build_ffmpeg_cmd(
     if caption_png:
         cmd += ["-i", str(caption_png)]
 
-    # Construction du filter_complex
-    # [0:v] est la vidéo, on la scale d'abord
-    scale_chain = (
-        f"[0:v]scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease,"
-        f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:color=black,"
-        f"setsar=1[vid]"
-    )
+    # ===== Construction du filter_complex =====
+    # Étape 1 : scale + pad au format 1080x1920
+    scale_filters = [
+        f"scale={TARGET_W}:{TARGET_H}:force_original_aspect_ratio=decrease",
+        f"pad={TARGET_W}:{TARGET_H}:(ow-iw)/2:(oh-ih)/2:color=black",
+        "setsar=1",
+    ]
+
+    # Étape 2 : ajoute les filtres de spoof (zoom, rotation, eq, noise, vignette, speed)
+    spoof_chain = _build_video_spoof_chain(spoof_params or {}) if spoof_params else []
+
+    # Concatène : [0:v] -> scale -> spoof -> [vid]
+    all_v_filters = scale_filters + spoof_chain
+    scale_chain = f"[0:v]{','.join(all_v_filters)}[vid]"
 
     if caption_png:
-        # Index de l'input du PNG : 1 si pas de music, sinon 2
         png_idx = 2 if has_music else 1
         y_expr = _y_pixel_for_align(align, position_pct, overlay_h)
-        # Overlay centré horizontalement, position Y selon align/position_pct
         overlay_chain = f"[vid][{png_idx}:v]overlay=x=(W-w)/2:y={y_expr}[out]"
-        filter_complex = f"{scale_chain};{overlay_chain}"
+        filter_complex_parts = [scale_chain, overlay_chain]
         out_label = "[out]"
     else:
-        filter_complex = scale_chain
+        filter_complex_parts = [scale_chain]
         out_label = "[vid]"
 
+    # ===== Audio filter pour speed (atempo) =====
+    af = _build_audio_spoof_filter(spoof_params or {}) if spoof_params else None
+    if af and not has_music:
+        # Applique atempo à l'audio source si présent
+        filter_complex_parts.append(f"[0:a]{af}[aout]")
+        audio_out_label = "[aout]"
+    elif af and has_music:
+        # Applique atempo à la musique source
+        filter_complex_parts.append(f"[1:a]{af}[aout]")
+        audio_out_label = "[aout]"
+    else:
+        audio_out_label = None
+
+    filter_complex = ";".join(filter_complex_parts)
     cmd += ["-filter_complex", filter_complex]
     cmd += ["-map", out_label]
 
     # Audio mapping
-    if has_music:
+    if audio_out_label:
+        cmd += ["-map", audio_out_label]
+        if has_music:
+            cmd += ["-shortest"]
+    elif has_music:
         cmd += ["-map", "1:a:0", "-shortest"]
     else:
         cmd += ["-map", "0:a?"]
 
-    # Cut to max_duration if set
-    if max_duration and max_duration > 0:
-        cmd += ["-t", f"{max_duration:.2f}"]
+    # Cut end : on calcule la durée à garder via -t
+    if cut_end > 0 or (max_duration and max_duration > 0):
+        if max_duration and max_duration > 0:
+            cmd += ["-t", f"{max_duration:.2f}"]
+        elif cut_end > 0:
+            # On a besoin de la durée de la vidéo source pour calculer
+            try:
+                probe = subprocess.run(
+                    ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                     "-of", "default=noprint_wrappers=1:nokey=1", video_path],
+                    capture_output=True, text=True, timeout=10,
+                )
+                src_dur = float(probe.stdout.strip() or "0")
+                if src_dur > (cut_start + cut_end + 0.1):
+                    target_dur = src_dur - cut_start - cut_end
+                    cmd += ["-t", f"{target_dur:.3f}"]
+            except Exception:
+                pass
 
     cmd += [
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "23",
+        "-b:v", f"{bitrate_kbps}k",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "128k",
-        # Strip original metadata (removes TikTok/Insta tracking tags)
+        # Strip original metadata
         "-map_metadata", "-1",
-        # +use_metadata_tags allows com.apple.quicktime.* tags
         "-movflags", "+faststart+use_metadata_tags",
     ]
 
-    # Inject randomized iPhone/Android metadata if provided
     if metadata:
         cmd += metadata_randomizer.metadata_to_ffmpeg_args(metadata)
 
@@ -430,6 +601,8 @@ def mix_batch_stream(
     device_choice: str = "smart_mix",
     va_name: str = "",
     team: str = "",
+    enabled_filters: Optional[List[str]] = None,
+    custom_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """Streaming version yielding progress events."""
     if not templates or not videos:
@@ -493,6 +666,13 @@ def mix_batch_stream(
         device_label = spoof_meta.get("model", "?")
         yield {"type": "log", "level": "INFO", "message": f"Spoofing as {platform_label} {device_label}"}
 
+        # Tirage aléatoire des params spoof vidéo (différent à chaque variante)
+        # Si enabled_filters est None -> tous activés, sinon seulement ceux listés
+        spoof_params = _random_spoof_params(
+            enabled_filters=enabled_filters,
+            custom_ranges=custom_ranges,
+        )
+
         cmd, ass_path = _build_ffmpeg_cmd(
             vid["path"], tpl.get("caption", ""), tpl.get("align", "center"),
             size_label, music_path, audio_priority, out_path,
@@ -501,6 +681,7 @@ def mix_batch_stream(
             max_duration=max_duration,
             metadata=spoof_meta,
             caption_style=caption_style,
+            spoof_params=spoof_params,
         )
         cmd_with_progress = cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:]
 
