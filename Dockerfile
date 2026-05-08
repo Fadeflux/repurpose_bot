@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Installation de FFmpeg + ffprobe + Tesseract OCR + polices + outils de download
+# Installation de FFmpeg + Tesseract OCR + polices Insta-style + outils
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     tesseract-ocr \
@@ -11,19 +11,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-inter \
     fontconfig \
     curl \
-    unzip \
+    ca-certificates \
     && fc-cache -fv \
     && rm -rf /var/lib/apt/lists/*
 
-# Téléchargement des PNGs Apple emoji
-# On clone juste le repo qui contient les PNGs (ils sont dans /160 généralement)
-RUN mkdir -p /opt/apple-emoji && \
-    curl -fsSL -o /tmp/emoji.zip \
-      "https://github.com/samuelngs/apple-emoji-linux/archive/refs/heads/main.zip" \
-    && unzip -q /tmp/emoji.zip -d /tmp/emoji-extract \
-    && find /tmp/emoji-extract -name "*.png" -exec cp {} /opt/apple-emoji/ \; 2>/dev/null \
-    && echo "Apple emoji PNGs : $(ls /opt/apple-emoji/ 2>/dev/null | wc -l) fichiers" \
-    && rm -rf /tmp/emoji.zip /tmp/emoji-extract
+# Téléchargement de la font Apple Color Emoji (version Linux du repo apple-emoji-linux)
+# Cette font contient les vraies images emoji Apple (sbix table) et fonctionne avec
+# Pillow 10+ via embedded_color=True à la taille fixe 137px.
+RUN mkdir -p /opt/fonts && \
+    curl -fsSL -o /opt/fonts/AppleColorEmoji.ttf \
+      "https://github.com/samuelngs/apple-emoji-linux/releases/latest/download/AppleColorEmoji-Linux.ttf" \
+    && ls -la /opt/fonts/ \
+    && echo "Apple Color Emoji font installée"
 
 WORKDIR /app
 
