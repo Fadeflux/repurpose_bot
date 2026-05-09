@@ -12,13 +12,13 @@ from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFil
 from app.services import cf_storage as storage
 from app.services import cf_video_scanner as video_scanner
 from app.utils.logger import get_logger
+from app.utils.storage_paths import VIDEO_DIR
 
 logger = get_logger("cf_content")
 
 router = APIRouter(prefix="/api/clipfusion/content", tags=["clipfusion-content"])
 
-# Stockage des vidéos brutes uploadées en /tmp
-VIDEO_DIR = Path("/tmp/clipfusion/videos")
+# Stockage des vidéos brutes uploadées : volume persistant /data si dispo, sinon /tmp
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTS = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
@@ -92,6 +92,33 @@ async def delete_video(vid_id: str):
 async def clear_videos():
     count = storage.clear_videos()
     return {"ok": True, "deleted": count}
+
+
+@router.post("/cleanup-orphans")
+async def cleanup_orphans(dry_run: bool = Query(False)):
+    """
+    Supprime les entrées DB qui pointent vers un fichier disque inexistant.
+    Utile après migration vers volume persistant : les anciennes entrées /tmp
+    pointent vers des fichiers qui n'existent plus.
+    Body: ?dry_run=true pour juste compter sans supprimer.
+    """
+    videos = storage.list_videos()
+    orphans: List[str] = []
+    for v in videos:
+        path = v.get("path", "")
+        if not path or not Path(path).exists():
+            orphans.append(v["id"])
+
+    deleted = 0
+    if not dry_run and orphans:
+        deleted = storage.delete_videos_bulk(orphans)
+
+    return {
+        "total_in_db": len(videos),
+        "orphans_found": len(orphans),
+        "deleted": deleted,
+        "dry_run": dry_run,
+    }
 
 
 @router.post("/filter")
