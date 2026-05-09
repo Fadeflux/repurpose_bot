@@ -16,6 +16,7 @@ from app.routes.cf_mixer import router as cf_mixer_router
 from app.routes.cf_vas import router as cf_vas_router
 from app.routes.cf_history import router as cf_history_router
 from app.routes.cf_models import router as cf_models_router
+from app.routes.cf_debug import router as cf_debug_router
 from app.services.auth import (
     check_password,
     is_authenticated,
@@ -52,6 +53,7 @@ app.include_router(cf_mixer_router)
 app.include_router(cf_vas_router)
 app.include_router(cf_history_router)
 app.include_router(cf_models_router)
+app.include_router(cf_debug_router)
 
 # Sert les fichiers statiques (CSS, JS, images si besoin)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -62,6 +64,18 @@ if STATIC_DIR.exists():
 @app.on_event("startup")
 async def on_startup():
     logger.info(f"{settings.APP_NAME} v{settings.VERSION} démarré.")
+
+    # Log les chemins de stockage utilisés (pour diagnostiquer volume Railway)
+    try:
+        from app.utils.storage_paths import BASE_DIR, VIDEO_DIR, is_persistent
+        if is_persistent():
+            logger.info(f"📁 Stockage PERSISTANT activé : BASE_DIR={BASE_DIR}")
+        else:
+            logger.warning(f"⚠️  Stockage ÉPHÉMÈRE (pas de volume Railway détecté) : BASE_DIR={BASE_DIR}")
+        logger.info(f"📁 VIDEO_DIR={VIDEO_DIR} (exists={VIDEO_DIR.exists()})")
+    except Exception as e:
+        logger.warning(f"Storage paths check échoué: {e}")
+
     if is_auth_enabled():
         logger.info("Login activé (TOOL_PASSWORD configuré)")
     else:
