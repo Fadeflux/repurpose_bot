@@ -12,12 +12,13 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.services import cf_storage as storage
 from app.utils.logger import get_logger
+from app.utils.storage_paths import MUSIC_DIR
 
 logger = get_logger("cf_music")
 
 router = APIRouter(prefix="/api/clipfusion/music", tags=["clipfusion-music"])
 
-MUSIC_DIR = Path("/tmp/clipfusion/music")
+# Stockage musique : volume persistant /data si dispo, sinon /tmp
 MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg"}
