@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>ClipFusion — Cleanup Orphelins DB</title>
+  <style>
+    body {
+      font-family: -apple-system, system-ui, sans-serif;
+      max-width: 700px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #0a0a0a;
+      color: #eee;
+    }
+    h1 { color: #fff; }
+    button {
+      padding: 12px 24px;
+      font-size: 15px;
+      margin: 8px 4px 8px 0;
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      background: #2a2a2a;
+      color: #fff;
+    }
+    button:hover { background: #3a3a3a; }
+    button.danger { background: #b03030; }
+    button.danger:hover { background: #d04040; }
+    pre {
+      background: #1a1a1a;
+      padding: 16px;
+      border-radius: 6px;
+      overflow: auto;
+      font-size: 13px;
+      border: 1px solid #333;
+    }
+    .info { color: #888; font-size: 13px; margin: 16px 0; }
+  </style>
+</head>
+<body>
+  <h1>🧹 Cleanup ClipFusion</h1>
+  <p class="info">
+    Cet outil supprime les entrées DB qui pointent vers des fichiers disque inexistants
+    (vidéos perdues quand /tmp a été wipé par Railway).
+  </p>
+
+  <button onclick="check()">1. Vérifier (dry_run, ne supprime rien)</button>
+  <button class="danger" onclick="cleanup()">2. Supprimer les orphelins</button>
+  <button onclick="listAll()">3. Voir toutes les vidéos en DB</button>
+
+  <h3>Résultat</h3>
+  <pre id="output">(clique sur un bouton ci-dessus)</pre>
+
+  <script>
+    const out = document.getElementById('output');
+
+    async function check() {
+      out.textContent = 'Vérification en cours...';
+      try {
+        const r = await fetch('/api/clipfusion/content/cleanup-orphans?dry_run=true', {
+          method: 'POST',
+        });
+        const j = await r.json();
+        out.textContent = JSON.stringify(j, null, 2);
+      } catch (e) {
+        out.textContent = 'Erreur: ' + e.message;
+      }
+    }
+
+    async function cleanup() {
+      if (!confirm('Confirmer la suppression des entrées orphelines ?')) return;
+      out.textContent = 'Suppression en cours...';
+      try {
+        const r = await fetch('/api/clipfusion/content/cleanup-orphans', {
+          method: 'POST',
+        });
+        const j = await r.json();
+        out.textContent = JSON.stringify(j, null, 2);
+      } catch (e) {
+        out.textContent = 'Erreur: ' + e.message;
+      }
+    }
+
+    async function listAll() {
+      out.textContent = 'Chargement...';
+      try {
+        const r = await fetch('/api/clipfusion/content/');
+        const j = await r.json();
+        // Affiche les 10 premières entrées avec leur path
+        const sample = j.slice(0, 10).map(v => ({
+          id: v.id,
+          model_id: v.model_id,
+          original_name: v.original_name,
+          path: v.path,
+        }));
+        out.textContent = `Total: ${j.length} vidéos en DB\n\n10 premières:\n${JSON.stringify(sample, null, 2)}`;
+      } catch (e) {
+        out.textContent = 'Erreur: ' + e.message;
+      }
+    }
+  </script>
+</body>
+</html>
