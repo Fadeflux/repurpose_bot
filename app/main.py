@@ -13,6 +13,7 @@ from app.routes.cf_content import router as cf_content_router
 from app.routes.cf_music import router as cf_music_router
 from app.routes.cf_extractor import router as cf_extractor_router
 from app.routes.cf_mixer import router as cf_mixer_router
+from app.routes.cf_vas import router as cf_vas_router
 from app.services.auth import (
     check_password,
     is_authenticated,
@@ -46,6 +47,7 @@ app.include_router(cf_content_router)
 app.include_router(cf_music_router)
 app.include_router(cf_extractor_router)
 app.include_router(cf_mixer_router)
+app.include_router(cf_vas_router)
 
 # Sert les fichiers statiques (CSS, JS, images si besoin)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
