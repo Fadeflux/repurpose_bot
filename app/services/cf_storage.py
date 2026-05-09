@@ -141,6 +141,12 @@ def init_schema() -> bool:
                     ADD COLUMN IF NOT EXISTS model_id INTEGER DEFAULT NULL,
                     ADD COLUMN IF NOT EXISTS model_label TEXT DEFAULT ''
                 """)
+                # Migration : ajout colonne model_id sur cf_videos (catégorie obligatoire)
+                cur.execute("""
+                    ALTER TABLE cf_videos
+                    ADD COLUMN IF NOT EXISTS model_id INTEGER DEFAULT NULL
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_cf_videos_model ON cf_videos(model_id)")
             conn.commit()
         logger.info("ClipFusion DB schema initialisé")
         return True
@@ -321,26 +327,37 @@ def _row_to_video(row) -> Dict[str, Any]:
         "original_name": row[3],
         "size": int(row[4] or 0),
         "created_at": row[5].isoformat() if row[5] else None,
+        "model_id": int(row[6]) if len(row) > 6 and row[6] is not None else None,
     }
 
 
-def list_videos() -> List[Dict[str, Any]]:
+def list_videos(model_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Liste les vidéos. Filtre optionnel par model_id (catégorie)."""
     if not is_db_enabled():
         return []
     try:
         with _get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, filename, path, original_name, size_bytes, created_at "
-                    "FROM cf_videos ORDER BY created_at DESC"
-                )
+                if model_id is not None:
+                    cur.execute(
+                        "SELECT id, filename, path, original_name, size_bytes, created_at, model_id "
+                        "FROM cf_videos WHERE model_id = %s ORDER BY created_at DESC",
+                        (int(model_id),),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT id, filename, path, original_name, size_bytes, created_at, model_id "
+                        "FROM cf_videos ORDER BY created_at DESC"
+                    )
                 return [_row_to_video(r) for r in cur.fetchall()]
     except Exception as e:
         logger.error(f"list_videos failed: {e}")
         return []
 
 
-def add_video(filename: str, path: str, original_name: str = "", size_bytes: int = 0) -> Optional[Dict[str, Any]]:
+def add_video(filename: str, path: str, original_name: str = "", size_bytes: int = 0,
+              model_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Ajoute une vidéo. model_id = catégorie/modèle obligatoire pour les nouveaux uploads."""
     if not is_db_enabled():
         return None
     vid_id = gen_id()
@@ -348,10 +365,11 @@ def add_video(filename: str, path: str, original_name: str = "", size_bytes: int
         with _get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO cf_videos (id, filename, path, original_name, size_bytes) "
-                    "VALUES (%s, %s, %s, %s, %s) "
-                    "RETURNING id, filename, path, original_name, size_bytes, created_at",
-                    (vid_id, filename, path, original_name or filename, size_bytes),
+                    "INSERT INTO cf_videos (id, filename, path, original_name, size_bytes, model_id) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) "
+                    "RETURNING id, filename, path, original_name, size_bytes, created_at, model_id",
+                    (vid_id, filename, path, original_name or filename, size_bytes,
+                     int(model_id) if model_id else None),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -361,6 +379,25 @@ def add_video(filename: str, path: str, original_name: str = "", size_bytes: int
         return None
 
 
+def update_video_model(vid_id: str, model_id: Optional[int]) -> bool:
+    """Change la catégorie d'une vidéo existante."""
+    if not is_db_enabled():
+        return False
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE cf_videos SET model_id = %s WHERE id = %s",
+                    (int(model_id) if model_id else None, vid_id),
+                )
+                ok = cur.rowcount > 0
+            conn.commit()
+        return ok
+    except Exception as e:
+        logger.error(f"update_video_model failed: {e}")
+        return False
+
+
 def get_video(vid_id: str) -> Optional[Dict[str, Any]]:
     if not is_db_enabled():
         return None
@@ -368,7 +405,7 @@ def get_video(vid_id: str) -> Optional[Dict[str, Any]]:
         with _get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id, filename, path, original_name, size_bytes, created_at "
+                    "SELECT id, filename, path, original_name, size_bytes, created_at, model_id "
                     "FROM cf_videos WHERE id = %s",
                     (vid_id,),
                 )
