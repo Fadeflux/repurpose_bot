@@ -229,6 +229,22 @@ def _build_bot() -> commands.Bot:
         except Exception as e:
             logger.warning(f"Sync au démarrage échouée: {e}")
 
+        # Sync les slash commands Discord (/request, /models, /status)
+        # Si CF_GUILD_ID est défini → sync immédiate sur ce serveur uniquement
+        # Sinon → sync globale (peut prendre 1h pour propager sur Discord)
+        try:
+            guild_id = os.environ.get("CF_GUILD_ID", "").strip()
+            if guild_id and guild_id.isdigit():
+                guild = discord.Object(id=int(guild_id))
+                bot.tree.copy_global_to(guild=guild)
+                synced = await bot.tree.sync(guild=guild)
+                logger.info(f"Slash commands synced sur guild {guild_id} : {len(synced)} commandes")
+            else:
+                synced = await bot.tree.sync()
+                logger.info(f"Slash commands synced (global, peut prendre 1h) : {len(synced)} commandes")
+        except Exception as e:
+            logger.warning(f"Tree sync échoué: {e}")
+
     @bot.event
     async def on_message(message: discord.Message):
         # Ignore les messages du bot lui-même
@@ -349,6 +365,13 @@ def _build_bot() -> commands.Bot:
             logger.info(f"Impossible d'envoyer DM à {display_name} (DM fermés)")
         except Exception as e:
             logger.warning(f"Erreur envoi DM: {e}")
+
+    # Branche les slash commands ClipFusion (/request, /models, /status)
+    try:
+        from app.services.cf_discord_bot import install_clipfusion_commands
+        install_clipfusion_commands(bot)
+    except Exception as e:
+        logger.warning(f"Install ClipFusion slash commands échoué: {e}")
 
     return bot
 
