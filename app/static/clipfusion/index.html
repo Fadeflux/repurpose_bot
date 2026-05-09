@@ -432,6 +432,12 @@
                                 <button type="button" id="cf-resync-vas" class="btn-resync" title="Resync VAs depuis Discord">🔄</button>
                             </div>
                         </div>
+                        <div class="dest-field" style="flex:0.9;">
+                            <span class="muted small">Modèle</span>
+                            <select id="cf-model" class="dest-select">
+                                <option value="">— Aucun —</option>
+                            </select>
+                        </div>
                         <div class="dest-field" style="flex:1.4;">
                             <span class="muted small">Device simulé (metadata)</span>
                             <select id="cf-device" class="dest-select">
@@ -599,6 +605,25 @@
                     <button class="btn-mini-action" id="va-admin-resync" style="margin-left:auto;">🔄 Resync</button>
                 </div>
                 <div id="va-admin-list" class="va-admin-list"></div>
+            </div>
+        </details>
+
+        <!-- Gestion des modèles -->
+        <details class="card models-admin-card" style="margin-top: 16px;">
+            <summary class="va-admin-summary">
+                <span class="card-label" style="margin:0;">👤 GESTION DES MODÈLES</span>
+                <span class="muted small">Créer / supprimer les modèles ajoutés au nom du dossier Drive</span>
+            </summary>
+            <div class="va-admin-body">
+                <p class="muted small" style="margin-bottom: 14px;">
+                    Le nom du modèle apparaît dans le nom du dossier Drive
+                    (ex: <code>ClipFusion_Wesley_Geelark_ID1_…</code>).
+                </p>
+                <div class="va-admin-toolbar">
+                    <input type="text" id="model-new-label" class="va-admin-email" placeholder="Nom du modèle (laisser vide → 'Modele {ID}' auto)" style="flex:1;">
+                    <button class="btn-mini-action" id="model-create" style="background: linear-gradient(135deg, var(--cyan), var(--purple)); color:white; border:none;">➕ Créer</button>
+                </div>
+                <div id="models-list" class="va-admin-list" style="margin-top: 14px;"></div>
             </div>
         </details>
     </section>

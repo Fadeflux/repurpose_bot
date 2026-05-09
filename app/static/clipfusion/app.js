@@ -18,6 +18,8 @@ const state = {
     selectedVA: '',
     selectedTeam: 'geelark',
     selectedDevice: 'iphone_random',
+    selectedModelId: '',
+    models: [],
     vasByTeam: { geelark: [], instagram: [] },
     vaEmails: {},  // discord_id -> email (pour afficher badge "pas d'email" dans le sélecteur)
     spoof: {
@@ -1756,6 +1758,9 @@ function startMix() {
         enabled_filters: JSON.stringify(spoofPayload.enabled_filters),
         custom_ranges: JSON.stringify(spoofPayload.custom_ranges),
     });
+    if (state.selectedModelId) {
+        params.set('model_id', state.selectedModelId);
+    }
     if (state.durationEnabled) {
         params.append('max_duration', state.durationSec);
     }
@@ -2208,6 +2213,98 @@ updatePhonePreview();
 syncPositionButtons();
 syncSizeButtons();
 
+// ============ MODÈLES (créatrices) ============
+async function loadModels() {
+    try {
+        const r = await fetch(API + '/models/');
+        const data = await r.json();
+        state.models = data.models || [];
+        renderModelSelect();
+        renderModelsList();
+    } catch (e) {
+        console.warn('loadModels failed', e);
+    }
+}
+
+function renderModelSelect() {
+    const sel = document.getElementById('cf-model');
+    if (!sel) return;
+    const current = state.selectedModelId;
+    sel.innerHTML = '<option value="">— Aucun —</option>';
+    state.models.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = String(m.id);
+        opt.textContent = m.label;
+        sel.appendChild(opt);
+    });
+    if (current && state.models.some(m => String(m.id) === String(current))) {
+        sel.value = String(current);
+    } else {
+        state.selectedModelId = '';
+    }
+}
+
+function renderModelsList() {
+    const list = document.getElementById('models-list');
+    if (!list) return;
+    if (!state.models || state.models.length === 0) {
+        list.innerHTML = '<div class="muted small">Aucun modèle. Créé un nouveau ci-dessus pour commencer.</div>';
+        return;
+    }
+    list.innerHTML = '';
+    state.models.forEach(m => {
+        const row = document.createElement('div');
+        row.className = 'va-admin-row';
+        row.innerHTML = `
+            <div class="va-admin-name">
+                ${escapeHtml(m.label)}
+                <span class="va-admin-team-badge">ID ${m.id}</span>
+            </div>
+            <div style="flex:1;"></div>
+            <button class="hist-delete-btn" data-id="${m.id}" title="Supprimer ce modèle">✕ Supprimer</button>
+        `;
+        list.appendChild(row);
+        row.querySelector('.hist-delete-btn').addEventListener('click', async () => {
+            if (!confirm(`Supprimer le modèle "${m.label}" ?\n(Les batches déjà créés gardent leur référence.)`)) return;
+            try {
+                const r = await fetch(API + '/models/' + m.id, { method: 'DELETE' });
+                if (r.ok) {
+                    toast(`🗑️ Modèle "${m.label}" supprimé`);
+                    await loadModels();
+                } else {
+                    toast('Suppression échouée', true);
+                }
+            } catch (e) {
+                toast('Erreur: ' + e.message, true);
+            }
+        });
+    });
+}
+
+document.getElementById('cf-model')?.addEventListener('change', (e) => {
+    state.selectedModelId = e.target.value;
+});
+
+document.getElementById('model-create')?.addEventListener('click', async () => {
+    const labelInput = document.getElementById('model-new-label');
+    const label = (labelInput.value || '').trim();
+    try {
+        const fd = new FormData();
+        fd.append('label', label);
+        const r = await fetch(API + '/models/', { method: 'POST', body: fd });
+        const data = await r.json();
+        if (data.ok && data.model) {
+            labelInput.value = '';
+            toast(`✓ Modèle "${data.model.label}" créé`);
+            await loadModels();
+        } else {
+            toast('Création échouée: ' + (data.detail || 'erreur'), true);
+        }
+    } catch (e) {
+        toast('Erreur: ' + e.message, true);
+    }
+});
+
 // ============ HISTORIQUE (étape 6) ============
 const histState = {
     period: 'all',
@@ -2424,4 +2521,5 @@ navSteps.forEach(s => {
 refreshAll();
 loadVAs();
 loadVAAdminList();
+loadModels();
 renderSpoofGrid();
