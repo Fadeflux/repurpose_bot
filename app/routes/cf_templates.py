@@ -11,13 +11,13 @@ from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 
 from app.services import cf_storage as storage
 from app.utils.logger import get_logger
+from app.utils.storage_paths import TEMPLATE_DIR as UPLOAD_DIR
 
 logger = get_logger("cf_templates")
 
 router = APIRouter(prefix="/api/clipfusion/templates", tags=["clipfusion-templates"])
 
-# Les uploads images templates vivent dans /tmp pour pas saturer Railway
-UPLOAD_DIR = Path("/tmp/clipfusion/templates")
+# Stockage thumbnails templates : volume persistant /data si dispo
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
