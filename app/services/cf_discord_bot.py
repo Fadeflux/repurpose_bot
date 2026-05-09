@@ -12,6 +12,7 @@ Variables d'env :
   CF_REQUEST_CHANNEL_IDS : IDs de canaux Discord (CSV) où /request est dispo
   CF_DEFAULT_TEAM        : équipe par défaut (geelark | instagram), default geelark
   CF_REQUEST_MAX_VIDEOS  : limite max par demande (default 200)
+  CF_CHANNEL_MSG_TTL     : durée (secondes) avant auto-delete des messages canal (default 60)
 """
 from __future__ import annotations
 
@@ -55,6 +56,14 @@ def _max_videos_per_request() -> int:
         return int(os.environ.get("CF_REQUEST_MAX_VIDEOS", "200"))
     except Exception:
         return 200
+
+
+def _channel_msg_ttl() -> int:
+    """Durée (en secondes) avant auto-suppression des messages dans le canal."""
+    try:
+        return int(os.environ.get("CF_CHANNEL_MSG_TTL", "60"))
+    except Exception:
+        return 60
 
 
 # ============================================================================
@@ -106,10 +115,8 @@ async def _worker_loop():
                 logger.exception(f"Erreur worker: {e}")
                 try:
                     if req.interaction:
-                        await req.interaction.followup.send(
-                            f"❌ Erreur pendant le mix : {e}",
-                            ephemeral=False,
-                        )
+                        # Message d'erreur s'auto-supprime aussi
+                        await _say(req, f"❌ Erreur pendant le mix : {e}")
                 except Exception:
                     pass
             finally:
@@ -186,7 +193,8 @@ async def _process_request(req: CFRequest):
             model_id=req.model_id,
         ):
             t = ev.get("type")
-            if t == "progress":
+            # FIX : le mixer émet "item_done" pour chaque vidéo terminée (pas "progress")
+            if t == "item_done":
                 progress_count += 1
                 # Progress chaque 10 vidéos
                 if progress_count - last_update_count >= 10 or progress_count == actual_qty:
@@ -204,31 +212,45 @@ async def _process_request(req: CFRequest):
         await _say(req, f"❌ Erreur pendant le mix : {e}")
         return
 
-    # 5. Notif finale
+    # 5. Notif finale dans le canal — courte, pas de lien (le lien va en DM privé)
     if drive_url:
-        msg = f"✅ Mix terminé : **{progress_count}** vidéos prêtes !\n📁 <{drive_url}>"
+        msg = f"✅ Mix terminé : **{progress_count}** vidéos prêtes ! 📩 Lien envoyé en DM."
     else:
         msg = f"✅ Mix terminé : **{progress_count}** vidéos générées (Drive non configuré)."
     await _say(req, msg)
 
-    # 6. DM au VA avec le lien direct
+    # 6. DM au VA avec le lien Drive (vrai message privé)
     if drive_url and req.interaction:
         try:
             user = await req.interaction.client.fetch_user(req.user_id)
             await user.send(
-                f"🎬 Ton batch ClipFusion est prêt !\n"
-                f"**{progress_count}** vidéos · modèle **{model_label}** · équipe **{req.team}**\n"
+                f"🎬 **Ton batch ClipFusion est prêt !**\n"
+                f"📊 **{progress_count}** vidéos · modèle **{model_label}** · équipe **{req.team}**\n"
                 f"📁 {drive_url}"
             )
+        except discord.Forbidden:
+            # VA a désactivé les DMs : on lui dit dans le canal (s'auto-supprime)
+            await _say(req, f"⚠️ <@{req.user_id}> impossible de t'envoyer un DM (DMs désactivés). Lien Drive : <{drive_url}>")
         except Exception as e:
             logger.warning(f"DM VA échoué: {e}")
+            await _say(req, f"⚠️ DM échoué. Lien Drive : <{drive_url}>")
 
 
 async def _say(req: CFRequest, content: str):
-    """Envoie un follow-up sur l'interaction (visible à tous dans le canal)."""
+    """
+    Envoie un follow-up sur l'interaction (visible à tous dans le canal),
+    qui s'auto-supprime après CF_CHANNEL_MSG_TTL secondes (60 par défaut).
+    Discord supporte le paramètre delete_after sur followup.send.
+    """
     try:
         if req.interaction:
-            await req.interaction.followup.send(content, ephemeral=False)
+            ttl = _channel_msg_ttl()
+            await req.interaction.followup.send(
+                content,
+                ephemeral=False,
+                # delete_after = secondes avant suppression auto par Discord
+                **({"delete_after": float(ttl)} if ttl > 0 else {}),
+            )
     except Exception as e:
         logger.warning(f"Reply Discord échoué: {e}")
 
@@ -361,6 +383,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         await _queue.put(req)
 
         # 6. Réponse initiale + lance worker si pas déjà
+        # Le message initial s'auto-supprime aussi (CF_CHANNEL_MSG_TTL)
         position = len(_pending) + (1 if _current else 0)
         if position <= 1 and _current is None:
             ack = (
@@ -372,7 +395,12 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 f"⏳ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}**\n"
                 f"Position dans la file : **{position}**"
             )
-        await interaction.response.send_message(ack, ephemeral=False)
+        ttl = _channel_msg_ttl()
+        await interaction.response.send_message(
+            ack,
+            ephemeral=False,
+            **({"delete_after": float(ttl)} if ttl > 0 else {}),
+        )
 
         # Démarre le worker s'il ne tourne pas
         global _worker_task
