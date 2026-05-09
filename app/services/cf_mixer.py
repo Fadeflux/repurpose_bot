@@ -900,4 +900,24 @@ def mix_batch_stream(
             logger.warning(f"Drive step failed: {drive_err}")
             yield {"type": "log", "level": "WARN", "message": f"Drive step skipped: {drive_err}"}
 
+    # ===== Enregistre le batch dans l'historique (table cf_batches) =====
+    try:
+        from app.services import cf_storage
+        di = drive_info or {}
+        cf_storage.add_batch(
+            va_name=va_name or "",
+            team=team or "",
+            device_choice=device_choice or "",
+            videos_count=len(output_metas),
+            videos_uploaded=di.get("uploaded", 0),
+            drive_folder_id=di.get("folder_id", ""),
+            drive_folder_url=di.get("folder_url", ""),
+            drive_folder_name=di.get("folder_name", ""),
+            va_email=(di.get("shared_with") or [""])[0] if di.get("shared_with") else "",
+            discord_notified=bool(va_name and di.get("folder_id")),
+            duration_seconds=round(total_elapsed, 2),
+        )
+    except Exception as e:
+        logger.warning(f"Save batch history échoué: {e}")
+
     yield {"type": "done", "outputs": output_metas, "total_elapsed": round(total_elapsed, 2), "drive": drive_info}
