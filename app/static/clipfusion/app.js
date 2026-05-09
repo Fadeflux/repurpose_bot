@@ -1992,18 +1992,14 @@ function renderSpoofSummary() {
         return `${fmt(p.min)}–${fmt(p.max)}`;
     };
 
-    // Chips à afficher : status global + 4 paramètres importants
+    // Chip "status" en premier, puis TOUS les paramètres
     const chips = [];
     chips.push(`<span class="spoof-chip spoof-chip-stat">
         <span class="dot"></span>
         ${totalActive}/${total} actifs
     </span>`);
 
-    // Paramètres "vedettes" qu'on veut voir d'un coup d'œil
-    const featured = ['speed', 'zoom', 'brightness', 'cut_start'];
-    featured.forEach(key => {
-        const p = state.spoof[key];
-        if (!p) return;
+    entries.forEach(([key, p]) => {
         const cls = p.enabled ? 'spoof-chip active' : 'spoof-chip';
         chips.push(`<span class="${cls}">
             <strong>${escapeHtml(p.label)}</strong> ${fmtRange(p)}
@@ -2013,9 +2009,14 @@ function renderSpoofSummary() {
     chipsHost.innerHTML = chips.join('');
 }
 
-// Modal open/close
-document.getElementById('btn-spoof-config')?.addEventListener('click', () => {
-    document.getElementById('spoof-modal').classList.remove('hidden');
+// Modal open : clic sur la card entière (plus de bouton dédié)
+const openSpoofModal = () => document.getElementById('spoof-modal').classList.remove('hidden');
+document.getElementById('spoof-summary-clickable')?.addEventListener('click', openSpoofModal);
+document.getElementById('spoof-summary-clickable')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openSpoofModal();
+    }
 });
 document.getElementById('spoof-modal-close')?.addEventListener('click', () => {
     document.getElementById('spoof-modal').classList.add('hidden');

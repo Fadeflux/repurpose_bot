@@ -397,18 +397,11 @@
                 <div class="muted" id="max-possible">Max possible: 0</div>
             </div>
 
-            <!-- Paramètres de spoof : RÉSUMÉ COMPACT -->
-            <div class="card spoof-summary-card">
-                <div class="spoof-summary-row">
-                    <div class="spoof-summary-left">
-                        <label class="card-label" style="margin:0;">⚙️ PARAMÈTRES DE SPOOF</label>
-                        <div class="spoof-summary-chips" id="spoof-summary-chips">
-                            <!-- Chips remplies par JS -->
-                        </div>
-                    </div>
-                    <button class="btn-spoof-config" id="btn-spoof-config" type="button">
-                        <span>⚙️</span> Configurer
-                    </button>
+            <!-- Paramètres de spoof : RÉSUMÉ COMPACT (clic n'importe où ouvre le modal) -->
+            <div class="card spoof-summary-card" id="spoof-summary-clickable" role="button" tabindex="0" title="Cliquer pour configurer en détail">
+                <label class="card-label" style="margin:0 0 10px 0;">⚙️ PARAMÈTRES DE SPOOF</label>
+                <div class="spoof-summary-chips" id="spoof-summary-chips">
+                    <!-- Chips remplies par JS (toutes affichées) -->
                 </div>
             </div>
         </div>
