@@ -1960,73 +1960,19 @@ function renderSpoofGrid() {
         cb.addEventListener('change', () => {
             p.enabled = cb.checked;
             item.classList.toggle('disabled', !cb.checked);
-            renderSpoofSummary();
         });
         const minInp = item.querySelector(`#sp-min-${key}`);
         const maxInp = item.querySelector(`#sp-max-${key}`);
         minInp.addEventListener('input', () => {
             const val = parseFloat(minInp.value);
             if (!isNaN(val)) p.min = p.isInt ? Math.round(val) : val;
-            renderSpoofSummary();
         });
         maxInp.addEventListener('input', () => {
             const val = parseFloat(maxInp.value);
             if (!isNaN(val)) p.max = p.isInt ? Math.round(val) : val;
-            renderSpoofSummary();
         });
     });
 }
-
-function renderSpoofSummary() {
-    // Met à jour les chips dans la card résumé compact
-    const chipsHost = document.getElementById('spoof-summary-chips');
-    if (!chipsHost) return;
-
-    const entries = Object.entries(state.spoof);
-    const totalActive = entries.filter(([k, p]) => p.enabled).length;
-    const total = entries.length;
-
-    // Format helper : affiche min–max avec moins de décimales
-    const fmtRange = (p) => {
-        const fmt = v => p.isInt ? String(Math.round(v)) : (Math.round(v * 100) / 100).toString();
-        return `${fmt(p.min)}–${fmt(p.max)}`;
-    };
-
-    // Chip "status" en premier, puis TOUS les paramètres
-    const chips = [];
-    chips.push(`<span class="spoof-chip spoof-chip-stat">
-        <span class="dot"></span>
-        ${totalActive}/${total} actifs
-    </span>`);
-
-    entries.forEach(([key, p]) => {
-        const cls = p.enabled ? 'spoof-chip active' : 'spoof-chip';
-        chips.push(`<span class="${cls}">
-            <strong>${escapeHtml(p.label)}</strong> ${fmtRange(p)}
-        </span>`);
-    });
-
-    chipsHost.innerHTML = chips.join('');
-}
-
-// Modal open : clic sur la card entière (plus de bouton dédié)
-const openSpoofModal = () => document.getElementById('spoof-modal').classList.remove('hidden');
-document.getElementById('spoof-summary-clickable')?.addEventListener('click', openSpoofModal);
-document.getElementById('spoof-summary-clickable')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        openSpoofModal();
-    }
-});
-document.getElementById('spoof-modal-close')?.addEventListener('click', () => {
-    document.getElementById('spoof-modal').classList.add('hidden');
-});
-// Click on overlay closes
-document.getElementById('spoof-modal')?.addEventListener('click', (e) => {
-    if (e.target.id === 'spoof-modal') {
-        e.target.classList.add('hidden');
-    }
-});
 
 document.getElementById('spoof-reset')?.addEventListener('click', () => {
     Object.values(state.spoof).forEach(p => {
@@ -2035,18 +1981,15 @@ document.getElementById('spoof-reset')?.addEventListener('click', () => {
         p.max = p.default_max;
     });
     renderSpoofGrid();
-    renderSpoofSummary();
     toast('↻ Paramètres remis aux valeurs par défaut');
 });
 document.getElementById('spoof-disable-all')?.addEventListener('click', () => {
     Object.values(state.spoof).forEach(p => { p.enabled = false; });
     renderSpoofGrid();
-    renderSpoofSummary();
 });
 document.getElementById('spoof-enable-all')?.addEventListener('click', () => {
     Object.values(state.spoof).forEach(p => { p.enabled = true; });
     renderSpoofGrid();
-    renderSpoofSummary();
 });
 
 function getSpoofPayload() {
@@ -2482,4 +2425,3 @@ refreshAll();
 loadVAs();
 loadVAAdminList();
 renderSpoofGrid();
-renderSpoofSummary();

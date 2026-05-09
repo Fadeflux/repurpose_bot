@@ -397,11 +397,16 @@
                 <div class="muted" id="max-possible">Max possible: 0</div>
             </div>
 
-            <!-- Paramètres de spoof : RÉSUMÉ COMPACT (clic n'importe où ouvre le modal) -->
-            <div class="card spoof-summary-card" id="spoof-summary-clickable" role="button" tabindex="0" title="Cliquer pour configurer en détail">
-                <label class="card-label" style="margin:0 0 10px 0;">⚙️ PARAMÈTRES DE SPOOF</label>
-                <div class="spoof-summary-chips" id="spoof-summary-chips">
-                    <!-- Chips remplies par JS (toutes affichées) -->
+            <!-- Paramètres de spoof : GRILLE COMPLÈTE (toutes les cases visibles) -->
+            <div class="card spoof-full-card">
+                <label class="card-label">⚙️ PARAMÈTRES DE SPOOF</label>
+                <div class="spoof-grid" id="spoof-grid">
+                    <!-- Rempli par JS au chargement (cf renderSpoofGrid) -->
+                </div>
+                <div class="spoof-actions">
+                    <button class="btn-mini-action" id="spoof-reset" type="button">↻ Reset</button>
+                    <button class="btn-mini-action" id="spoof-disable-all" type="button">☐ Désactiver</button>
+                    <button class="btn-mini-action" id="spoof-enable-all" type="button">☑ Activer</button>
                 </div>
             </div>
         </div>
@@ -677,32 +682,6 @@
             <div class="bb-x">=</div>
             <div class="bb-stat"><span class="bb-icon">🔀</span> <strong id="bb-mix" class="bb-result">0</strong> <span class="bb-mini">mix</span></div>
             <button class="bb-launch" id="bb-launch">⏳ Prêt</button>
-        </div>
-    </div>
-
-    <!-- SPOOF CONFIG MODAL -->
-    <div class="modal-overlay hidden" id="spoof-modal">
-        <div class="modal spoof-modal">
-            <div class="modal-header">
-                <div class="modal-title"><span class="modal-icon">⚙️</span> PARAMÈTRES DE SPOOF</div>
-                <div class="modal-actions">
-                    <button class="btn-modal btn-modal-close" id="spoof-modal-close" type="button">× Fermer</button>
-                </div>
-            </div>
-            <div class="modal-body">
-                <p class="muted small" style="margin-bottom: 18px;">
-                    Min / Max appliqués aléatoirement à chaque variante générée.
-                    Décocher = filtre désactivé pour tous les mix.
-                </p>
-                <div class="spoof-grid" id="spoof-grid">
-                    <!-- Rempli par JS au chargement -->
-                </div>
-                <div class="spoof-actions">
-                    <button class="btn-mini-action" id="spoof-reset" type="button">↻ Reset défauts</button>
-                    <button class="btn-mini-action" id="spoof-disable-all" type="button">☐ Tout désactiver</button>
-                    <button class="btn-mini-action" id="spoof-enable-all" type="button">☑ Tout activer</button>
-                </div>
-            </div>
         </div>
     </div>
 

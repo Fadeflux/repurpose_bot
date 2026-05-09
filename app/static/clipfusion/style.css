@@ -2557,76 +2557,96 @@ kbd {
 }
 
 /* ===================================================================
-   SPOOF SUMMARY CARD (clickable, toutes les chips visibles) + MODAL
+   SPOOF FULL CARD (toutes les cases visibles dans la card à droite)
    ================================================================= */
 
-.spoof-summary-card {
-    cursor: pointer;
-    user-select: none;
-    transition: border-color var(--t-fast), background var(--t-fast);
-    padding: 16px 20px !important;
+.spoof-full-card {
+    padding: 18px 20px !important;
 }
-.spoof-summary-card:hover {
-    border-color: var(--cyan) !important;
-    background: var(--bg-card-hover);
+.spoof-full-card .spoof-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 12px;
 }
-.spoof-summary-card:focus-visible {
-    outline: 2px solid var(--cyan);
-    outline-offset: 2px;
-}
-.spoof-summary-chips {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-}
-.spoof-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 11px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 500;
+.spoof-full-card .spoof-item {
     background: var(--bg-elev);
     border: 1px solid var(--border);
-    color: var(--text-dim);
+    border-radius: var(--r-md);
+    padding: 8px 10px;
     transition: all var(--t-fast);
 }
-.spoof-chip.active {
-    background: var(--cyan-soft);
+.spoof-full-card .spoof-item.disabled {
+    opacity: 0.45;
+}
+.spoof-full-card .spoof-item-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+}
+.spoof-full-card .spoof-item-header input[type="checkbox"] {
+    accent-color: var(--cyan);
+    cursor: pointer;
+    width: 13px;
+    height: 13px;
+}
+.spoof-full-card .spoof-item-header label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+}
+.spoof-full-card .spoof-inputs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.spoof-full-card .spoof-inputs span {
+    font-size: 10px;
+    color: var(--text-faint);
+}
+.spoof-full-card .spoof-inputs input[type="number"] {
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 5px;
+    width: 48px;
+    font-size: 10px;
+    font-family: ui-monospace, monospace;
+}
+.spoof-full-card .spoof-inputs input[type="number"]:focus {
+    outline: none;
+    border-color: var(--cyan);
+}
+.spoof-full-card .spoof-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+.spoof-full-card .btn-mini-action {
+    background: var(--bg-card);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 4px 9px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: all var(--t-fast);
+}
+.spoof-full-card .btn-mini-action:hover {
     border-color: var(--cyan);
     color: var(--cyan);
 }
-.spoof-chip strong {
-    color: inherit;
-    font-weight: 700;
-    margin-right: 2px;
-}
-.spoof-chip-stat {
-    background: linear-gradient(135deg, var(--cyan-soft), rgba(139, 92, 246, 0.10));
-    border: 1px solid var(--cyan);
-    color: var(--cyan);
-    font-weight: 700;
-}
-.spoof-chip .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 6px var(--green);
-}
 
-/* Spoof Modal */
-.spoof-modal {
-    max-width: 1100px;
-    width: 92vw;
-    max-height: 88vh;
-    display: flex;
-    flex-direction: column;
-}
-.spoof-modal .modal-body {
-    padding: 24px 28px 28px;
-    overflow-y: auto;
+/* Sur écran moins large : 2 colonnes au lieu de 3 */
+@media (max-width: 1400px) {
+    .spoof-full-card .spoof-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
