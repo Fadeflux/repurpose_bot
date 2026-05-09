@@ -19,6 +19,7 @@ const state = {
     selectedTeam: 'geelark',
     selectedDevice: 'smart_mix',
     vasByTeam: { geelark: [], instagram: [] },
+    vaEmails: {},  // discord_id -> email (pour afficher badge "pas d'email" dans le sélecteur)
     spoof: {
         // key -> { enabled, min, max, default_min, default_max, step, label, isInt }
         bitrate:    { enabled: true, min: 8000,  max: 12000, default_min: 8000,  default_max: 12000, step: 100,    label: 'Video Bitrate', isInt: true },
@@ -2009,14 +2010,22 @@ function getSpoofPayload() {
 // ============ VA ADMIN (gestion emails Drive) ============
 async function loadVAAdminList() {
     const list = document.getElementById('va-admin-list');
-    if (!list) return;
     try {
         const res = await fetch(API + '/list-vas-admin');
         const data = await res.json();
         const vas = data.vas || [];
-        renderVAAdminList(vas);
+        // Peuple state.vaEmails (utilisé pour badge "pas d'email" dans le sélecteur Destination)
+        state.vaEmails = {};
+        vas.forEach(v => {
+            if (v.discord_id) state.vaEmails[v.discord_id] = (v.email || '').trim();
+        });
+        // Re-render le sélecteur VA si déjà chargé (pour mettre à jour les badges)
+        if (Object.keys(state.vasByTeam).some(t => state.vasByTeam[t].length > 0)) {
+            renderVASelect();
+        }
+        if (list) renderVAAdminList(vas);
     } catch (e) {
-        list.innerHTML = '<div class="muted small">Erreur de chargement</div>';
+        if (list) list.innerHTML = '<div class="muted small">Erreur de chargement</div>';
     }
 }
 
@@ -2060,6 +2069,10 @@ function renderVAAdminList(vas) {
                 if (data.ok) {
                     status.className = 'va-admin-status ok';
                     status.textContent = '✓ saved';
+                    // Met à jour le state local et le sélecteur de la card Destination
+                    const newEmail = input.value.trim();
+                    state.vaEmails[input.dataset.discordId] = newEmail;
+                    renderVASelect();
                     setTimeout(() => { status.textContent = ''; }, 2000);
                 } else {
                     status.className = 'va-admin-status err';
@@ -2142,7 +2155,12 @@ function renderVASelect() {
     list.forEach(v => {
         const opt = document.createElement('option');
         opt.value = v.name;
-        opt.textContent = v.name;
+        // Affiche un badge ⚠️ si pas d'email enregistré pour ce VA
+        const hasEmail = state.vaEmails[v.discord_id] && state.vaEmails[v.discord_id].length > 0;
+        opt.textContent = hasEmail ? v.name : `${v.name} ⚠️ (pas d'email)`;
+        if (!hasEmail) {
+            opt.dataset.noEmail = 'true';
+        }
         sel.appendChild(opt);
     });
     // Restaure la sélection si toujours valide
