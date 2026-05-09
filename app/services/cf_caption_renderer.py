@@ -163,6 +163,58 @@ def _render_emoji_to_image(emoji_str: str, target_size: int) -> Optional[Image.I
 
 
 # ---------------------------------------------------------------------------
+# Nettoyage du texte de caption avant rendu
+# ---------------------------------------------------------------------------
+# Caractères invisibles à supprimer purement et simplement
+# (les variation selectors \ufe0f sont GARDÉS car nécessaires pour les emojis)
+_INVISIBLE_CHARS_TO_STRIP = (
+    "\u200b"  # ZERO WIDTH SPACE
+    "\u200c"  # ZERO WIDTH NON-JOINER
+    "\u200e"  # LEFT-TO-RIGHT MARK
+    "\u200f"  # RIGHT-TO-LEFT MARK
+    "\u2060"  # WORD JOINER
+    "\u2061"  # FUNCTION APPLICATION (math invisible)
+    "\u2062"  # INVISIBLE TIMES
+    "\u2063"  # INVISIBLE SEPARATOR
+    "\u2064"  # INVISIBLE PLUS
+    "\ufeff"  # ZERO WIDTH NO-BREAK SPACE / BOM
+)
+
+
+def _clean_caption_text(text: str) -> str:
+    """
+    Normalise le texte d'une caption avant rendu :
+    - Convertit tous les types de retours à la ligne en '\\n' standard
+    - Supprime les caractères invisibles parasites (zero-width spaces, etc.)
+    - Trim les espaces de fin de ligne (qui peuvent foirer le word-wrap)
+
+    Bug typique réglé : OCR qui insère des U+2028 (LINE SEPARATOR), U+2029
+    (PARAGRAPH SEPARATOR), \\r\\n Windows ou \\r Mac. Ces caractères ne sont pas
+    découpés par split('\\n') donc ils restent dans le texte et la regex emoji
+    peut les capturer → tofu en bout de ligne.
+    """
+    if not text:
+        return ""
+
+    # 1) Normalise tous les types de séparateurs de lignes en '\n'
+    text = text.replace("\r\n", "\n")  # Windows
+    text = text.replace("\r", "\n")    # Mac classique
+    text = text.replace("\u2028", "\n")  # LINE SEPARATOR (Unicode)
+    text = text.replace("\u2029", "\n")  # PARAGRAPH SEPARATOR (Unicode)
+    text = text.replace("\u0085", "\n")  # NEXT LINE (NEL)
+    text = text.replace("\u000c", "\n")  # FORM FEED
+    text = text.replace("\u000b", "\n")  # VERTICAL TAB
+
+    # 2) Supprime les caractères invisibles parasites
+    for ch in _INVISIBLE_CHARS_TO_STRIP:
+        text = text.replace(ch, "")
+
+    # 3) Trim les espaces et caractères de control en fin de chaque ligne
+    cleaned_lines = [line.rstrip() for line in text.split("\n")]
+    return "\n".join(cleaned_lines)
+
+
+# ---------------------------------------------------------------------------
 # Rendu principal de la caption
 # ---------------------------------------------------------------------------
 def render_caption_png(
@@ -186,6 +238,9 @@ def render_caption_png(
     text_font_path = _get_text_font_path()
     text_font = ImageFont.truetype(text_font_path, font_size)
     emoji_size = int(font_size * 1.15)
+
+    # Nettoyage du texte (normalise les \n, supprime invisibles parasites)
+    text = _clean_caption_text(text)
 
     # ---------- Étape 1 : tokenize + word-wrap ----------
     tmp = Image.new("RGBA", (1, 1))
