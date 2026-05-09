@@ -122,10 +122,12 @@ async def run_mix_stream(
     team: str = Query(""),
     enabled_filters: Optional[str] = Query(None),  # JSON list ex: ["brightness","contrast"]
     custom_ranges: Optional[str] = Query(None),    # JSON dict ex: {"speed":[1.05,1.10]}
+    model_id: Optional[int] = Query(None),
 ):
     """Stream SSE pour progression en temps réel."""
     templates = _selected_templates()
-    videos = storage.list_videos()
+    # Si model_id fourni, on filtre les vidéos sur cette catégorie (utilisé par le bot Discord)
+    videos = storage.list_videos(model_id=model_id) if model_id else storage.list_videos()
     music = storage.list_music() if audio_priority == "music" else None
 
     # Parse JSON params (sinon None -> tous activés, plages par défaut)
@@ -168,6 +170,7 @@ async def run_mix_stream(
                 team=team,
                 enabled_filters=parsed_filters,
                 custom_ranges=parsed_ranges,
+                model_id=model_id,
             ):
                 if ev.get("type") == "item_done":
                     out = ev["output"]
