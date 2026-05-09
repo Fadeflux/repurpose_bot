@@ -2688,21 +2688,39 @@ kbd {
     align-self: stretch;
 }
 
-/* Compact dest-grid pour rentrer dans une card plus petite */
+/* Compact dest-grid pour rentrer dans une card plus petite
+   Layout en grille 2x2 sur les écrans étroits (équipe+VA / modèle+device) */
 .card-compact .dest-grid {
-    flex-wrap: wrap;
-    gap: 8px;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 12px;
 }
 .card-compact .dest-field {
-    flex: 1 1 130px;
+    flex: unset;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.card-compact .dest-field > div[style*="display:flex"] {
     min-width: 0;
 }
 .card-compact .dest-select {
     padding: 7px 10px !important;
     font-size: 12px !important;
+    width: 100%;
+    min-width: 0;
 }
 .card-compact .btn-resync {
     padding: 0 10px !important;
+    flex-shrink: 0;
+}
+
+/* Sur écran moyen+ : 4 colonnes côte à côte */
+@media (min-width: 1500px) {
+    .card-compact .dest-grid {
+        grid-template-columns: auto 1.4fr 1fr 1.4fr;
+    }
 }
 
 /* Small-screen fallback */
