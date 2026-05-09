@@ -236,6 +236,46 @@ async def _say(req: CFRequest, content: str):
 # ============================================================================
 # INSTALLATION DU SLASH COMMAND SUR LE BOT EXISTANT
 # ============================================================================
+def _has_model_role(member: "discord.Member", model_id: int) -> bool:
+    """
+    Check si le VA a le rôle Discord 'ID{X}' qui l'autorise à utiliser ce modèle.
+    Match insensible à la casse : 'ID1', 'id1', 'Id1' tous OK.
+    Les admins (permissions.administrator) bypassent toujours.
+    """
+    if not isinstance(member, discord.Member):
+        return False
+    # Admin bypass
+    try:
+        if member.guild_permissions.administrator:
+            return True
+    except Exception:
+        pass
+    target = f"id{int(model_id)}"
+    for role in member.roles:
+        if (role.name or "").strip().lower() == target:
+            return True
+    return False
+
+
+def _allowed_models_for_member(member: "discord.Member") -> List[int]:
+    """Liste des IDs de modèles auxquels le membre a accès via ses rôles."""
+    if not isinstance(member, discord.Member):
+        return []
+    # Admin = tout
+    try:
+        if member.guild_permissions.administrator:
+            return [m["id"] for m in cf_storage.list_models()]
+    except Exception:
+        pass
+    out: List[int] = []
+    import re as _re
+    for role in member.roles:
+        m = _re.match(r"^id(\d+)$", (role.name or "").strip().lower())
+        if m:
+            out.append(int(m.group(1)))
+    return out
+
+
 def install_clipfusion_commands(bot: "commands.Bot") -> None:
     """
     À appeler une fois le bot construit (avant tree.sync). Ajoute /request
@@ -260,7 +300,24 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             )
             return
 
-        # 2. Validation quantité
+        # 2. CONTRÔLE D'ACCÈS PAR RÔLE : le VA doit avoir le rôle ID{modele}
+        if not _has_model_role(interaction.user, modele):
+            allowed_ids = _allowed_models_for_member(interaction.user)
+            if allowed_ids:
+                lst = ", ".join(f"`ID{i}`" for i in sorted(allowed_ids))
+                msg = (
+                    f"❌ Tu n'as pas accès au modèle **ID{modele}**.\n"
+                    f"Tes modèles autorisés : {lst}"
+                )
+            else:
+                msg = (
+                    f"❌ Tu n'as pas accès au modèle **ID{modele}**.\n"
+                    f"Aucun rôle de modèle assigné. Demande à un admin de t'attribuer un rôle `IDX`."
+                )
+            await interaction.response.send_message(msg, ephemeral=True)
+            return
+
+        # 3. Validation quantité
         max_q = _max_videos_per_request()
         if quantite < 1:
             await interaction.response.send_message(
@@ -275,7 +332,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             )
             return
 
-        # 3. Validation modèle
+        # 4. Validation modèle
         model = cf_storage.get_model(modele)
         if not model:
             available = cf_storage.list_models()
@@ -287,7 +344,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             await interaction.response.send_message(msg, ephemeral=True)
             return
 
-        # 4. Construit la requête + ajoute dans la queue
+        # 5. Construit la requête + ajoute dans la queue
         _ensure_queue()
         team = _default_team()
         req = CFRequest(
@@ -303,7 +360,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         _pending.append(req)
         await _queue.put(req)
 
-        # 5. Réponse initiale + lance worker si pas déjà
+        # 6. Réponse initiale + lance worker si pas déjà
         position = len(_pending) + (1 if _current else 0)
         if position <= 1 and _current is None:
             ack = (
@@ -322,7 +379,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         if _worker_task is None or _worker_task.done():
             _worker_task = asyncio.create_task(_worker_loop())
 
-    @bot.tree.command(name="models", description="Liste les modèles disponibles")
+    @bot.tree.command(name="models", description="Liste les modèles auxquels tu as accès")
     async def models_cmd(interaction: "discord.Interaction"):
         allowed = _get_request_channel_ids()
         if allowed and interaction.channel_id not in allowed:
@@ -331,18 +388,29 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 ephemeral=True,
             )
             return
-        models = cf_storage.list_models()
-        if not models:
+        all_models = cf_storage.list_models()
+        if not all_models:
             await interaction.response.send_message(
                 "Aucun modèle configuré. Demande à l'admin d'en créer.",
                 ephemeral=True,
             )
             return
+        # Filtre selon les rôles du VA
+        my_ids = set(_allowed_models_for_member(interaction.user))
+        my_models = [m for m in all_models if m["id"] in my_ids]
+
+        if not my_models:
+            await interaction.response.send_message(
+                "❌ Tu n'as accès à aucun modèle.\nDemande à un admin de t'attribuer un rôle `IDX` (ex: `ID1`, `ID2`).",
+                ephemeral=True,
+            )
+            return
+
         lines = []
-        for m in models:
+        for m in my_models:
             n_videos = len(cf_storage.list_videos(model_id=m["id"]))
             lines.append(f"• **ID {m['id']}** — {m['label']} ({n_videos} vidéos)")
-        msg = "**📋 Modèles disponibles :**\n" + "\n".join(lines)
+        msg = "**📋 Tes modèles autorisés :**\n" + "\n".join(lines)
         msg += "\n\nUtilise `/request quantite:50 modele:1`"
         await interaction.response.send_message(msg, ephemeral=True)
 
