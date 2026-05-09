@@ -273,6 +273,28 @@
     <section id="step-3" class="step-panel">
         <h2><span>🎬</span> Contenu brut</h2>
 
+        <!-- CATEGORY SELECTOR (obligatoire) -->
+        <div class="card category-selector-card">
+            <label class="card-label">👤 CATÉGORIE / MODÈLE <span style="color:var(--red);font-weight:700;">*</span></label>
+            <div class="category-row">
+                <select id="content-model-select" class="dest-select" style="flex:1;">
+                    <option value="">⚠️ Choisis une catégorie avant d'uploader des vidéos</option>
+                </select>
+                <button class="btn btn-ghost" id="btn-refresh-models" type="button" title="Recharger la liste des modèles">🔄</button>
+            </div>
+            <div class="muted small" id="category-hint" style="margin-top:8px;">
+                Les vidéos uploadées seront associées à cette catégorie. Crée des modèles dans l'étape 5 → "Gestion des modèles" en bas.
+            </div>
+        </div>
+
+        <!-- FILTRE PAR CATÉGORIE (visible uniquement si plusieurs modèles) -->
+        <div class="card category-filter-card" id="category-filter-card" style="display:none;">
+            <label class="card-label">📂 FILTRER LES VIDÉOS PAR CATÉGORIE</label>
+            <div class="category-filter-pills" id="category-filter-pills">
+                <!-- Rempli par JS -->
+            </div>
+        </div>
+
         <div class="card">
             <label class="card-label">📂 DOSSIER DES VIDÉOS BRUTES</label>
             <div class="folder-row">

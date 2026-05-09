@@ -20,6 +20,8 @@ const state = {
     selectedDevice: 'iphone_random',
     selectedModelId: '',
     models: [],
+    contentModelId: '',         // catégorie active à l'étape 3 (upload)
+    contentFilterModelId: '',   // filtre d'affichage (pour la liste vidéos uploadées)
     vasByTeam: { geelark: [], instagram: [] },
     vaEmails: {},  // discord_id -> email (pour afficher badge "pas d'email" dans le sélecteur)
     spoof: {
@@ -994,8 +996,14 @@ async function uploadVideoFiles(files) {
 
 function uploadOne(file, itemId) {
     return new Promise((resolve, reject) => {
+        // Vérification : catégorie obligatoire pour upload
+        if (!state.contentModelId) {
+            reject(new Error('Catégorie obligatoire — sélectionne d\'abord un modèle'));
+            return;
+        }
         const fd = new FormData();
         fd.append('files', file);
+        fd.append('model_id', state.contentModelId);
         const xhr = new XMLHttpRequest();
         xhr.open('POST', API + '/content/upload');
         xhr.upload.onprogress = (e) => {
@@ -1006,7 +1014,11 @@ function uploadOne(file, itemId) {
         };
         xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) resolve();
-            else reject(new Error('HTTP ' + xhr.status));
+            else {
+                let detail = 'HTTP ' + xhr.status;
+                try { detail = JSON.parse(xhr.responseText).detail || detail; } catch(_){}
+                reject(new Error(detail));
+            }
         };
         xhr.onerror = () => reject(new Error('réseau'));
         xhr.send(fd);
@@ -1062,7 +1074,11 @@ function formatSize(bytes) {
     return n.toFixed(n >= 10 || i === 0 ? 0 : 1) + ' ' + units[i];
 }
 async function refreshVideos() {
-    const r = await fetch(API + '/content/');
+    // Applique le filtre catégorie si défini
+    const filterParam = state.contentFilterModelId
+        ? '?model_id=' + encodeURIComponent(state.contentFilterModelId)
+        : '';
+    const r = await fetch(API + '/content/' + filterParam);
     const list = await r.json();
     document.getElementById('vid-count').textContent = list.length;
     const container = document.getElementById('videos-list');
@@ -1070,7 +1086,10 @@ async function refreshVideos() {
     if (scanBtn) scanBtn.disabled = list.length === 0;
 
     if (list.length === 0) {
-        container.innerHTML = `<div class="empty-state"><div>🎬</div><div>Aucune vidéo brute</div></div>`;
+        const filterMsg = state.contentFilterModelId
+            ? '<div>Aucune vidéo dans cette catégorie</div>'
+            : '<div>Aucune vidéo brute</div>';
+        container.innerHTML = `<div class="empty-state"><div>🎬</div>${filterMsg}</div>`;
         return;
     }
     container.innerHTML = list.map((v, i) => {
@@ -2221,9 +2240,132 @@ async function loadModels() {
         state.models = data.models || [];
         renderModelSelect();
         renderModelsList();
+        renderContentModelSelect();
+        renderCategoryFilterPills();
     } catch (e) {
         console.warn('loadModels failed', e);
     }
+}
+
+// ============ ÉTAPE 3 : SÉLECTEUR CATÉGORIE (upload obligatoire) ============
+function renderContentModelSelect() {
+    const sel = document.getElementById('content-model-select');
+    if (!sel) return;
+    const current = state.contentModelId;
+    sel.innerHTML = '<option value="">⚠️ Choisis une catégorie avant d\'uploader des vidéos</option>';
+    state.models.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = String(m.id);
+        opt.textContent = `ID ${m.id} — ${m.label}`;
+        sel.appendChild(opt);
+    });
+    if (current && state.models.some(m => String(m.id) === String(current))) {
+        sel.value = String(current);
+    } else {
+        state.contentModelId = '';
+    }
+    updateUploadGuard();
+}
+
+function updateUploadGuard() {
+    // Bloque visuellement les zones d'upload si pas de catégorie sélectionnée
+    const card = document.querySelector('.category-selector-card');
+    const dropZone = document.getElementById('video-drop-zone');
+    const folderRow = document.querySelector('.folder-row');
+    const filterSection = document.querySelector('.filter-section');
+    const folderActions = document.querySelector('.folder-actions');
+
+    const hasCategory = !!state.contentModelId;
+
+    if (card) card.classList.toggle('invalid', !hasCategory);
+    if (dropZone) dropZone.classList.toggle('upload-disabled', !hasCategory);
+    [folderRow, filterSection, folderActions].forEach(el => {
+        if (el) el.classList.toggle('upload-disabled', !hasCategory);
+    });
+
+    // Hint dynamique
+    const hint = document.getElementById('category-hint');
+    if (hint) {
+        if (state.models.length === 0) {
+            hint.innerHTML = '⚠️ <strong>Aucun modèle créé.</strong> Va à l\'étape 5 → "👤 Gestion des modèles" en bas pour en créer un.';
+            hint.style.color = 'var(--red)';
+        } else if (!hasCategory) {
+            hint.textContent = '⚠️ Sélectionne une catégorie ci-dessus pour pouvoir uploader des vidéos.';
+            hint.style.color = '';
+        } else {
+            const m = state.models.find(x => String(x.id) === String(state.contentModelId));
+            hint.textContent = m
+                ? `Les vidéos uploadées seront associées à : ID ${m.id} — ${m.label}`
+                : '';
+            hint.style.color = '';
+        }
+    }
+}
+
+document.getElementById('content-model-select')?.addEventListener('change', (e) => {
+    state.contentModelId = e.target.value;
+    updateUploadGuard();
+    // Si on sélectionne une catégorie, on filtre aussi automatiquement la liste affichée sur celle-ci
+    state.contentFilterModelId = e.target.value;
+    renderCategoryFilterPills();
+    refreshVideos();
+});
+
+document.getElementById('btn-refresh-models')?.addEventListener('click', () => {
+    loadModels();
+    toast('🔄 Modèles rechargés');
+});
+
+// ============ ÉTAPE 3 : FILTRE PAR CATÉGORIE (liste vidéos) ============
+async function renderCategoryFilterPills() {
+    const card = document.getElementById('category-filter-card');
+    const host = document.getElementById('category-filter-pills');
+    if (!host || !card) return;
+
+    if (!state.models || state.models.length === 0) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = '';
+
+    // Compteurs : récupère le nb de vidéos par catégorie via l'API
+    let countsByModel = {};
+    let totalAll = 0;
+    try {
+        const all = await fetch(API + '/content/').then(r => r.json());
+        if (Array.isArray(all)) {
+            totalAll = all.length;
+            all.forEach(v => {
+                const k = v.model_id != null ? String(v.model_id) : '_none';
+                countsByModel[k] = (countsByModel[k] || 0) + 1;
+            });
+        }
+    } catch {}
+
+    const pills = [];
+    pills.push(`
+        <button class="category-filter-pill ${!state.contentFilterModelId ? 'active' : ''}" data-filter="">
+            Toutes <span class="pill-count">${totalAll}</span>
+        </button>
+    `);
+    state.models.forEach(m => {
+        const count = countsByModel[String(m.id)] || 0;
+        const isActive = String(state.contentFilterModelId) === String(m.id);
+        pills.push(`
+            <button class="category-filter-pill ${isActive ? 'active' : ''}" data-filter="${m.id}">
+                ID ${m.id} — ${escapeHtml(m.label)} <span class="pill-count">${count}</span>
+            </button>
+        `);
+    });
+    host.innerHTML = pills.join('');
+
+    host.querySelectorAll('.category-filter-pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+            state.contentFilterModelId = btn.dataset.filter;
+            renderCategoryFilterPills();
+            refreshVideos();
+        });
+    });
 }
 
 function renderModelSelect() {

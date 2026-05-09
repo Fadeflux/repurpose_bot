@@ -2749,3 +2749,84 @@ kbd {
 .models-admin-card {
     margin-bottom: 80px !important;
 }
+
+/* ===================================================================
+   CATEGORY SELECTOR (étape 3 — obligatoire pour uploader)
+   ================================================================= */
+.category-selector-card {
+    border-color: var(--cyan) !important;
+    background: linear-gradient(135deg, var(--cyan-soft), var(--bg-card)) !important;
+}
+.category-selector-card.invalid {
+    border-color: var(--red) !important;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), var(--bg-card)) !important;
+    animation: pulse-warn 2s ease-in-out infinite;
+}
+@keyframes pulse-warn {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.12); }
+}
+.category-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.category-row .dest-select {
+    padding: 10px 14px !important;
+    font-size: 14px !important;
+}
+.category-row .btn-ghost {
+    padding: 0 14px !important;
+    font-size: 16px !important;
+}
+
+.category-filter-card {
+    margin-top: 8px;
+}
+.category-filter-pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+.category-filter-pill {
+    background: var(--bg-deep);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--t-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.category-filter-pill:hover {
+    border-color: var(--border-hover);
+    color: var(--text);
+}
+.category-filter-pill.active {
+    background: linear-gradient(135deg, var(--cyan), var(--purple));
+    border-color: transparent;
+    color: white;
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+}
+.category-filter-pill .pill-count {
+    background: rgba(0, 0, 0, 0.25);
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+.category-filter-pill.active .pill-count {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+/* Disable les zones d'upload quand pas de catégorie sélectionnée */
+.upload-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+    filter: grayscale(0.3);
+}
