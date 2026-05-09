@@ -21,6 +21,7 @@ from typing import List, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
 from app.utils.logger import get_logger
+from app.utils.storage_paths import OUTPUT_DIR
 
 logger = get_logger("cf_caption_renderer")
 
@@ -233,7 +234,7 @@ def render_caption_png(
             layout_lines.append(current)
 
     if not layout_lines:
-        out = out_path or Path("/tmp/clipfusion/output/_caption_empty.png")
+        out = out_path or (OUTPUT_DIR / "_caption_empty.png")
         out.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGBA", (1, 1), (0, 0, 0, 0)).save(out)
         return out
@@ -305,7 +306,7 @@ def render_caption_png(
     # ---------- Étape 5 : sauvegarde ----------
     if out_path is None:
         import random as _r
-        out_path = Path("/tmp/clipfusion/output") / f"_caption_{_r.randint(100000, 999999)}.png"
+        out_path = OUTPUT_DIR / f"_caption_{_r.randint(100000, 999999)}.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path, "PNG")
     return out_path
