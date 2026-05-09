@@ -5,9 +5,9 @@ Routes montées sous /api/clipfusion/content/...
 import shutil
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFile
 
 from app.services import cf_storage as storage
 from app.services import cf_video_scanner as video_scanner
@@ -17,8 +17,7 @@ logger = get_logger("cf_content")
 
 router = APIRouter(prefix="/api/clipfusion/content", tags=["clipfusion-content"])
 
-# Stockage des vidéos brutes uploadées en /tmp (transient — le mix génère des
-# outputs qui sont uploadés sur Drive, donc pas besoin de garder les bruts longtemps)
+# Stockage des vidéos brutes uploadées en /tmp
 VIDEO_DIR = Path("/tmp/clipfusion/videos")
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -26,7 +25,21 @@ ALLOWED_EXTS = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
 
 
 @router.post("/upload")
-async def upload_videos(files: List[UploadFile] = File(...)):
+async def upload_videos(
+    files: List[UploadFile] = File(...),
+    model_id: int = Form(..., description="Catégorie/modèle obligatoire"),
+):
+    """
+    Upload de vidéos brutes. Le model_id (catégorie) est OBLIGATOIRE
+    pour qu'on sache à quelle modèle ces vidéos appartiennent.
+    """
+    if not model_id:
+        raise HTTPException(400, "model_id (catégorie) obligatoire pour upload de vidéos")
+
+    # Vérifie que le modèle existe
+    if not storage.get_model(model_id):
+        raise HTTPException(400, f"Le modèle ID {model_id} n'existe pas. Crée-le d'abord.")
+
     saved = []
     for f in files:
         ext = Path(f.filename).suffix.lower()
@@ -45,6 +58,7 @@ async def upload_videos(files: List[UploadFile] = File(...)):
             path=str(save_path),
             original_name=f.filename,
             size_bytes=size_bytes,
+            model_id=model_id,
         )
         if meta:
             saved.append(meta)
@@ -52,8 +66,18 @@ async def upload_videos(files: List[UploadFile] = File(...)):
 
 
 @router.get("/")
-async def list_videos():
-    return storage.list_videos()
+async def list_videos(model_id: Optional[int] = Query(None)):
+    """Liste les vidéos brutes. Filtre optionnel par catégorie/modèle."""
+    return storage.list_videos(model_id=model_id)
+
+
+@router.patch("/{vid_id}/model")
+async def update_video_model(vid_id: str, model_id: Optional[int] = Form(None)):
+    """Change la catégorie d'une vidéo existante (peut être vidée avec model_id=null)."""
+    ok = storage.update_video_model(vid_id, model_id)
+    if not ok:
+        raise HTTPException(404, "Vidéo introuvable")
+    return {"ok": True}
 
 
 @router.delete("/{vid_id}")
