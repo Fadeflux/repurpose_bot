@@ -54,6 +54,16 @@ SPOOF_RANGES: Dict[str, Tuple[float, float]] = {
 SPOOF_INT_KEYS = {"bitrate", "noise"}
 
 
+def _sanitize_folder_part(s: str) -> str:
+    """Nettoie une chaîne pour la mettre dans un nom de dossier Drive.
+    Garde lettres, chiffres, tirets ; remplace espaces par '_' ; vire reste."""
+    import re
+    s = (s or "").strip()
+    s = re.sub(r"\s+", "_", s)
+    s = re.sub(r"[^A-Za-z0-9_\-]", "", s)
+    return s[:40] or "x"
+
+
 def _random_spoof_params(
     enabled_filters: Optional[List[str]] = None,
     custom_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
@@ -603,6 +613,7 @@ def mix_batch_stream(
     team: str = "",
     enabled_filters: Optional[List[str]] = None,
     custom_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
+    model_id: Optional[int] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """Streaming version yielding progress events."""
     if not templates or not videos:
@@ -780,12 +791,34 @@ def mix_batch_stream(
             from app.services import drive_service
             if drive_service.is_drive_enabled():
                 from datetime import datetime
-                # Nom du dossier : inclut le VA si fourni
+                # Récupère le label du modèle si model_id fourni
+                model_label = ""
+                if model_id:
+                    try:
+                        from app.services import cf_storage as _cfs
+                        m = _cfs.get_model(int(model_id))
+                        if m:
+                            model_label = m.get("label") or f"ID{model_id}"
+                    except Exception:
+                        model_label = f"ID{model_id}"
+
+                # Nom du dossier : VA + équipe + ID modèle + date + nb vidéos
+                # ex : ClipFusion_Wesley_Geelark_ID1_20260509_153022_5vids
                 date_part = datetime.now().strftime('%Y%m%d_%H%M%S')
+                parts = ["ClipFusion"]
                 if va_name:
-                    folder_name = f"ClipFusion_{va_name}_{date_part}_{len(output_metas)}vids"
-                else:
-                    folder_name = f"ClipFusion_{date_part}_{len(output_metas)}vids"
+                    parts.append(_sanitize_folder_part(va_name))
+                if team:
+                    parts.append(team.capitalize())
+                if model_id:
+                    # Utilise le label si défini, sinon "ID{n}"
+                    if model_label and model_label.lower() != f"modele {model_id}".lower():
+                        parts.append(_sanitize_folder_part(model_label))
+                    else:
+                        parts.append(f"ID{model_id}")
+                parts.append(date_part)
+                parts.append(f"{len(output_metas)}vids")
+                folder_name = "_".join(parts)
                 yield {"type": "log", "level": "INFO", "message": f"📤 Drive: création dossier {folder_name}"}
 
                 folder_id = drive_service.create_batch_folder(folder_name)
@@ -904,6 +937,16 @@ def mix_batch_stream(
     try:
         from app.services import cf_storage
         di = drive_info or {}
+        # Récupère le label du modèle (si pas déjà fait pour Drive folder)
+        _model_label_to_save = ""
+        if model_id:
+            try:
+                m = cf_storage.get_model(int(model_id))
+                if m:
+                    _model_label_to_save = m.get("label", "")
+            except Exception:
+                pass
+
         cf_storage.add_batch(
             va_name=va_name or "",
             team=team or "",
@@ -916,6 +959,8 @@ def mix_batch_stream(
             va_email=(di.get("shared_with") or [""])[0] if di.get("shared_with") else "",
             discord_notified=bool(va_name and di.get("folder_id")),
             duration_seconds=round(total_elapsed, 2),
+            model_id=int(model_id) if model_id else None,
+            model_label=_model_label_to_save,
         )
     except Exception as e:
         logger.warning(f"Save batch history échoué: {e}")
