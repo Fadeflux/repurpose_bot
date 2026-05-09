@@ -126,7 +126,8 @@ async def run_mix_stream(
 ):
     """Stream SSE pour progression en temps réel."""
     templates = _selected_templates()
-    videos = storage.list_videos()
+    # Si model_id fourni, on filtre les vidéos sur cette catégorie (utilisé par le bot Discord)
+    videos = storage.list_videos(model_id=model_id) if model_id else storage.list_videos()
     music = storage.list_music() if audio_priority == "music" else None
 
     # Parse JSON params (sinon None -> tous activés, plages par défaut)
