@@ -64,9 +64,52 @@ def _max_videos_per_request() -> int:
 def _channel_msg_ttl() -> int:
     """Durée (en secondes) avant auto-suppression des messages dans le canal."""
     try:
-        return int(os.environ.get("CF_CHANNEL_MSG_TTL", "60"))
+        return int(os.environ.get("CF_CHANNEL_MSG_TTL", "30"))
     except Exception:
-        return 60
+        return 30
+
+
+def _seconds_per_video() -> int:
+    """Estimation moyenne du temps de génération d'1 vidéo (en secondes)."""
+    try:
+        return int(os.environ.get("CF_SECONDS_PER_VIDEO", "8"))
+    except Exception:
+        return 8
+
+
+def _format_eta(seconds: int) -> str:
+    """Formate une durée en secondes en texte lisible (ex: '~5 minutes', '~30 secondes')."""
+    if seconds < 60:
+        return f"~{seconds} secondes"
+    minutes = (seconds + 30) // 60  # arrondi au plus proche
+    if minutes == 1:
+        return "~1 minute"
+    return f"~{minutes} minutes"
+
+
+def _compute_queue_eta_seconds(new_videos: int) -> int:
+    """
+    Calcule l'ETA totale (en secondes) pour une nouvelle demande de N vidéos.
+    Inclut : mix en cours (si dispo) + file d'attente + nouvelle demande.
+    """
+    spv = _seconds_per_video()
+    total = new_videos * spv
+
+    # Ajoute les vidéos en cours de mix (estimation : on assume qu'il reste la moitié)
+    if _current is not None:
+        try:
+            total += (_current.quantite * spv) // 2
+        except Exception:
+            pass
+
+    # Ajoute toutes les demandes en attente devant nous
+    for p in _pending:
+        try:
+            total += p.quantite * spv
+        except Exception:
+            pass
+
+    return total
 
 
 def _detect_team_from_guild(guild_id: Optional[int]) -> str:
@@ -400,6 +443,11 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         _ensure_queue()
         guild_id = interaction.guild_id if interaction.guild_id else None
         team = _detect_team_from_guild(guild_id)
+
+        # Calcul ETA AVANT d'ajouter à la queue (pour pas se compter soi-même 2 fois)
+        eta_seconds = _compute_queue_eta_seconds(quantite)
+        eta_str = _format_eta(eta_seconds)
+
         req = CFRequest(
             interaction_id=interaction.id,
             channel_id=interaction.channel_id or 0,
@@ -413,18 +461,17 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         _pending.append(req)
         await _queue.put(req)
 
-        # 6. Réponse initiale + lance worker si pas déjà
-        # Le message initial s'auto-supprime aussi (CF_CHANNEL_MSG_TTL)
-        position = len(_pending) + (1 if _current else 0)
+        # 6. Réponse initiale dans le canal (s'auto-supprime après CF_CHANNEL_MSG_TTL = 30s)
+        position = len(_pending) + (1 if _current and _current is not req else 0)
         if position <= 1 and _current is None:
             ack = (
                 f"⚙️ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}** · équipe **{team}**\n"
-                f"Lancement immédiat..."
+                f"📩 <@{interaction.user.id}> tu as reçu un DM avec les détails. Lancement immédiat..."
             )
         else:
             ack = (
                 f"⏳ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}** · équipe **{team}**\n"
-                f"Position dans la file : **{position}**"
+                f"📩 <@{interaction.user.id}> tu as reçu un DM avec les détails. Position dans la file : **{position}**"
             )
         ttl = _channel_msg_ttl()
         await interaction.response.send_message(
@@ -432,6 +479,23 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             ephemeral=False,
             **({"delete_after": float(ttl)} if ttl > 0 else {}),
         )
+
+        # 7. DM "en préparation" envoyé immédiatement au VA avec l'ETA
+        try:
+            user = await interaction.client.fetch_user(interaction.user.id)
+            position_msg = ""
+            if position > 1:
+                position_msg = f"\n⏳ Position dans la file : **{position}**"
+            await user.send(
+                f"🎬 **Ta demande est en préparation !**\n"
+                f"📊 **{quantite}** vidéos · modèle **{model['label']}** · équipe **{team}**\n"
+                f"⏱️ Tu vas recevoir ton drive dans environ **{eta_str}**{position_msg}\n"
+                f"Je t'enverrai le lien Drive dès que c'est prêt 🚀"
+            )
+        except discord.Forbidden:
+            logger.warning(f"DM 'en préparation' refusé pour user {interaction.user.id} (DMs désactivés)")
+        except Exception as e:
+            logger.warning(f"DM 'en préparation' échoué pour user {interaction.user.id}: {e}")
 
         # Démarre le worker s'il ne tourne pas
         global _worker_task
