@@ -122,12 +122,25 @@ def init_schema() -> bool:
     CREATE INDEX IF NOT EXISTS idx_cf_batches_created ON cf_batches(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_cf_batches_va ON cf_batches(va_name);
     CREATE INDEX IF NOT EXISTS idx_cf_batches_team ON cf_batches(team);
+
+    CREATE TABLE IF NOT EXISTS cf_models (
+        id SERIAL PRIMARY KEY,
+        label TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_cf_models_id ON cf_models(id);
     """
 
     try:
         with _get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(create_sql)
+                # Migration : ajout colonnes model_id / model_label sur cf_batches existant
+                cur.execute("""
+                    ALTER TABLE cf_batches
+                    ADD COLUMN IF NOT EXISTS model_id INTEGER DEFAULT NULL,
+                    ADD COLUMN IF NOT EXISTS model_label TEXT DEFAULT ''
+                """)
             conn.commit()
         logger.info("ClipFusion DB schema initialisé")
         return True
@@ -634,6 +647,8 @@ def add_batch(
     va_email: str = "",
     discord_notified: bool = False,
     duration_seconds: float = 0.0,
+    model_id: Optional[int] = None,
+    model_label: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Enregistre un batch de mix dans l'historique."""
     if not is_db_enabled():
@@ -646,14 +661,15 @@ def add_batch(
                     "INSERT INTO cf_batches "
                     "(id, va_name, team, device_choice, videos_count, videos_uploaded, "
                     " drive_folder_id, drive_folder_url, drive_folder_name, va_email, "
-                    " discord_notified, duration_seconds) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    " discord_notified, duration_seconds, model_id, model_label) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                     "RETURNING id, va_name, team, device_choice, videos_count, videos_uploaded, "
                     "drive_folder_id, drive_folder_url, drive_folder_name, va_email, "
                     "discord_notified, duration_seconds, created_at",
                     (bid, va_name, team, device_choice, videos_count, videos_uploaded,
                      drive_folder_id, drive_folder_url, drive_folder_name, va_email,
-                     discord_notified, duration_seconds),
+                     discord_notified, duration_seconds,
+                     int(model_id) if model_id else None, model_label or ""),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -759,3 +775,104 @@ def get_batches_stats() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"get_batches_stats failed: {e}")
         return {"total": 0, "today": 0, "videos_total": 0, "videos_today": 0}
+
+
+# ---------------------------------------------------------------------------
+# MODELS (créatrices OnlyFans gérées par les VAs)
+# ---------------------------------------------------------------------------
+def list_models() -> List[Dict[str, Any]]:
+    """Liste tous les modèles enregistrés, triés par ID."""
+    if not is_db_enabled():
+        return []
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, label, created_at FROM cf_models ORDER BY id ASC"
+                )
+                rows = cur.fetchall()
+        return [
+            {
+                "id": int(r[0]),
+                "label": r[1] or f"Modele {r[0]}",
+                "created_at": r[2].isoformat() if r[2] else None,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error(f"list_models failed: {e}")
+        return []
+
+
+def add_model(label: str = "") -> Optional[Dict[str, Any]]:
+    """
+    Crée un nouveau modèle.
+    Si label est vide, génère "Modele {id}" automatiquement après l'INSERT.
+    """
+    if not is_db_enabled():
+        return None
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                # INSERT avec label vide d'abord
+                cur.execute(
+                    "INSERT INTO cf_models (label) VALUES (%s) RETURNING id, label, created_at",
+                    (label or "",),
+                )
+                row = cur.fetchone()
+                model_id = int(row[0])
+                # Si label vide, on met "Modele {id}"
+                if not label:
+                    final_label = f"Modele {model_id}"
+                    cur.execute(
+                        "UPDATE cf_models SET label = %s WHERE id = %s RETURNING id, label, created_at",
+                        (final_label, model_id),
+                    )
+                    row = cur.fetchone()
+            conn.commit()
+        return {
+            "id": int(row[0]),
+            "label": row[1],
+            "created_at": row[2].isoformat() if row[2] else None,
+        }
+    except Exception as e:
+        logger.error(f"add_model failed: {e}")
+        return None
+
+
+def delete_model(model_id: int) -> bool:
+    if not is_db_enabled():
+        return False
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM cf_models WHERE id = %s", (int(model_id),))
+                deleted = cur.rowcount > 0
+            conn.commit()
+        return deleted
+    except Exception as e:
+        logger.error(f"delete_model failed: {e}")
+        return False
+
+
+def get_model(model_id: int) -> Optional[Dict[str, Any]]:
+    if not is_db_enabled() or not model_id:
+        return None
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, label, created_at FROM cf_models WHERE id = %s",
+                    (int(model_id),),
+                )
+                row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": int(row[0]),
+            "label": row[1],
+            "created_at": row[2].isoformat() if row[2] else None,
+        }
+    except Exception as e:
+        logger.error(f"get_model failed: {e}")
+        return None
