@@ -287,11 +287,14 @@ def render_caption_png(
                     img.paste(emoji_img, (x, ey), emoji_img)
                     x += emoji_img.size[0]
                 else:
-                    if style == "outlined":
-                        draw.text((x, y), val, font=text_font, fill=(255, 255, 255, 255),
-                                  stroke_width=outline_width, stroke_fill=(0, 0, 0, 255))
-                    else:
-                        draw.text((x, y), val, font=text_font, fill=(255, 255, 255, 255))
+                    # Emoji non supporté par la font Apple installée → on le SKIP
+                    # plutôt que d'afficher un carré blanc (tofu) avec la font texte.
+                    # Mieux vaut un mot manquant qu'un glyph illisible.
+                    logger.warning(f"Emoji non supporté skippé: {repr(val)}")
+                    # On avance quand même de emoji_size pour rester cohérent avec
+                    # la layout calculée par _measure_lines (sinon le texte qui suit
+                    # se chevauche). Résultat : un petit espace vide à la place de
+                    # l'emoji manquant, plus joli qu'un tofu.
                     x += emoji_size
             else:
                 # Texte : avec ou sans contour selon le style
