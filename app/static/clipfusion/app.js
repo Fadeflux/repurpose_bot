@@ -17,7 +17,7 @@ const state = {
     captionStyle: 'outlined',
     selectedVA: '',
     selectedTeam: 'geelark',
-    selectedDevice: 'smart_mix',
+    selectedDevice: 'iphone_random',
     vasByTeam: { geelark: [], instagram: [] },
     vaEmails: {},  // discord_id -> email (pour afficher badge "pas d'email" dans le sélecteur)
     spoof: {
@@ -1750,7 +1750,7 @@ function startMix() {
         position_pct: state.positionPct,
         font_size_px: state.fontSizePx,
         caption_style: state.captionStyle || 'outlined',
-        device_choice: state.selectedDevice || 'smart_mix',
+        device_choice: state.selectedDevice || 'iphone_random',
         va_name: state.selectedVA || '',
         team: state.selectedTeam || '',
         enabled_filters: JSON.stringify(spoofPayload.enabled_filters),
