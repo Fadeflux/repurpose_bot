@@ -15,13 +15,13 @@ from app.services import cf_storage as storage
 from app.services import cf_ocr as ocr
 from app.services import cf_video_extractor as video_extractor
 from app.utils.logger import get_logger
+from app.utils.storage_paths import UPLOAD_DIR, MUSIC_DIR
 
 logger = get_logger("cf_extractor")
 
 router = APIRouter(prefix="/api/clipfusion/extractor", tags=["clipfusion-extractor"])
 
-UPLOAD_DIR = Path("/tmp/clipfusion/uploads")
-MUSIC_DIR = Path("/tmp/clipfusion/music")
+# Stockage uploads (screenshots/vidéos source) + musique : volume persistant
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 
