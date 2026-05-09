@@ -7,12 +7,15 @@ Architecture :
   - File d'attente FIFO : 1 mix à la fois pour pas saturer Railway
   - Réactions emoji pour feedback visuel (⏳ → ⚙️ → ✅ ou ❌)
   - DM final au VA avec lien Drive
+  - Détection auto de l'équipe selon le serveur Discord (CF_GUILD_ID_GEELARK / CF_GUILD_ID_INSTAGRAM)
 
 Variables d'env :
-  CF_REQUEST_CHANNEL_IDS : IDs de canaux Discord (CSV) où /request est dispo
-  CF_DEFAULT_TEAM        : équipe par défaut (geelark | instagram), default geelark
-  CF_REQUEST_MAX_VIDEOS  : limite max par demande (default 200)
-  CF_CHANNEL_MSG_TTL     : durée (secondes) avant auto-delete des messages canal (default 60)
+  CF_REQUEST_CHANNEL_IDS    : IDs de canaux Discord (CSV) où /request est dispo
+  CF_DEFAULT_TEAM           : équipe par défaut si guild non reconnu (default geelark)
+  CF_REQUEST_MAX_VIDEOS     : limite max par demande (default 200)
+  CF_CHANNEL_MSG_TTL        : durée (sec) avant auto-delete des messages canal (default 60)
+  CF_GUILD_ID_GEELARK       : ID du serveur Discord Geelark (équipe geelark)
+  CF_GUILD_ID_INSTAGRAM     : ID du serveur Discord Instagram (équipe instagram)
 """
 from __future__ import annotations
 
@@ -64,6 +67,32 @@ def _channel_msg_ttl() -> int:
         return int(os.environ.get("CF_CHANNEL_MSG_TTL", "60"))
     except Exception:
         return 60
+
+
+def _detect_team_from_guild(guild_id: Optional[int]) -> str:
+    """
+    Détecte l'équipe selon le serveur Discord d'où vient la commande.
+    Si le guild_id correspond à CF_GUILD_ID_GEELARK → 'geelark'
+    Si le guild_id correspond à CF_GUILD_ID_INSTAGRAM → 'instagram'
+    Sinon → fallback sur CF_DEFAULT_TEAM
+    """
+    if not guild_id:
+        return _default_team()
+
+    geelark_id = os.environ.get("CF_GUILD_ID_GEELARK", "").strip()
+    instagram_id = os.environ.get("CF_GUILD_ID_INSTAGRAM", "").strip()
+
+    if geelark_id and str(guild_id) == geelark_id:
+        return "geelark"
+    if instagram_id and str(guild_id) == instagram_id:
+        return "instagram"
+
+    # Pas de match : fallback sur la valeur par défaut
+    logger.warning(
+        f"Guild ID {guild_id} ne matche ni Geelark ({geelark_id}) ni Instagram ({instagram_id}), "
+        f"fallback sur CF_DEFAULT_TEAM={_default_team()}"
+    )
+    return _default_team()
 
 
 # ============================================================================
@@ -367,8 +396,10 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             return
 
         # 5. Construit la requête + ajoute dans la queue
+        # NOUVEAU : détection auto de l'équipe selon le serveur Discord
         _ensure_queue()
-        team = _default_team()
+        guild_id = interaction.guild_id if interaction.guild_id else None
+        team = _detect_team_from_guild(guild_id)
         req = CFRequest(
             interaction_id=interaction.id,
             channel_id=interaction.channel_id or 0,
@@ -387,12 +418,12 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         position = len(_pending) + (1 if _current else 0)
         if position <= 1 and _current is None:
             ack = (
-                f"⚙️ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}**\n"
+                f"⚙️ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}** · équipe **{team}**\n"
                 f"Lancement immédiat..."
             )
         else:
             ack = (
-                f"⏳ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}**\n"
+                f"⏳ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}** · équipe **{team}**\n"
                 f"Position dans la file : **{position}**"
             )
         ttl = _channel_msg_ttl()
