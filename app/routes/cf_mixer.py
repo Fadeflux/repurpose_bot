@@ -12,13 +12,14 @@ from fastapi.responses import FileResponse, StreamingResponse
 from app.services import cf_storage as storage
 from app.services import cf_mixer as mixer_service
 from app.utils.logger import get_logger
+from app.utils.storage_paths import OUTPUT_DIR
 
 logger = get_logger("cf_mixer_route")
 
 router = APIRouter(prefix="/api/clipfusion/mixer", tags=["clipfusion-mixer"])
 
-# Le mixer écrit les outputs dans /tmp/clipfusion/output (cf cf_mixer.OUTPUT_DIR)
-OUTPUT_DIR = Path("/tmp/clipfusion/output")
+# Le mixer écrit les outputs dans OUTPUT_DIR (volume persistant /data si dispo)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _selected_templates() -> List[Dict[str, Any]]:
