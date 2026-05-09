@@ -67,7 +67,7 @@ body {
     background-attachment: fixed;
     color: var(--text);
     min-height: 100vh;
-    padding: 20px 20px 200px;
+    padding: 20px 20px 280px;
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
@@ -2742,4 +2742,10 @@ kbd {
 /* Force la dernière card/élément de chaque step-panel à avoir une marge en bas */
 .step-panel > *:last-child {
     margin-bottom: 32px;
+}
+
+/* La section "Gestion des modèles" en bas a besoin d'espace pour ne pas être cachée
+   par la bottom bar fixed (1 tpl × X raw...) */
+.models-admin-card {
+    margin-bottom: 80px !important;
 }
