@@ -117,7 +117,7 @@ async def run_mix_stream(
     font_size_px: Optional[int] = Query(None),
     max_duration: Optional[float] = Query(None),
     caption_style: str = Query("outlined"),
-    device_choice: str = Query("smart_mix"),
+    device_choice: str = Query("iphone_random"),
     va_name: str = Query(""),
     team: str = Query(""),
     enabled_filters: Optional[str] = Query(None),  # JSON list ex: ["brightness","contrast"]
