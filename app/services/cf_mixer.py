@@ -19,10 +19,9 @@ from app.utils.logger import get_logger
 
 logger = get_logger("cf_mixer")
 
-# Output dir : on utilise /tmp pour éviter de saturer le filesystem persistant
-# Railway, et parce que les outputs sont de toute façon uploadés vers Drive.
-BASE_DIR = Path("/tmp/clipfusion")
-OUTPUT_DIR = BASE_DIR / "output"
+# Output dir : volume persistant /data si dispo, sinon /tmp.
+# Les outputs sont de toute façon uploadés vers Drive après mix.
+from app.utils.storage_paths import BASE_DIR, OUTPUT_DIR
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -571,6 +570,8 @@ def mix_batch(
     for t in templates:
         for v in videos:
             pairs.append((t, v))
+    # Mélange aléatoire pour éviter de toujours retomber sur les mêmes paires
+    random.shuffle(pairs)
     pairs = pairs[:max_variants] if max_variants > 0 else pairs
 
     total = len(pairs)
@@ -631,6 +632,8 @@ def mix_batch_stream(
     for t in templates:
         for v in videos:
             pairs.append((t, v))
+    # Mélange aléatoire pour éviter de toujours retomber sur les mêmes paires
+    random.shuffle(pairs)
     pairs = pairs[:max_variants] if max_variants > 0 else pairs
     total = len(pairs)
 
