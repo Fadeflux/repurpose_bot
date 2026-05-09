@@ -56,6 +56,13 @@
             <div class="step-sub">Lancer le mix</div>
             <div class="step-num" id="num-5">5</div>
         </button>
+        <div class="step-arrow">›</div>
+        <button class="step" data-step="6">
+            <div class="step-icon">📊</div>
+            <div class="step-title">Historique</div>
+            <div class="step-sub">Mix précédents</div>
+            <div class="step-num" id="num-6">6</div>
+        </button>
     </nav>
 
     <main>
@@ -598,6 +605,70 @@
                 <div id="va-admin-list" class="va-admin-list"></div>
             </div>
         </details>
+    </section>
+
+    <!-- STEP 6: HISTORIQUE -->
+    <section id="step-6" class="step-panel">
+        <h2><span>📊</span> Historique des mix</h2>
+
+        <!-- Stats header -->
+        <div class="card history-stats-card">
+            <div class="history-stats">
+                <div class="stat-cell">
+                    <div class="stat-num" id="hist-stat-total">0</div>
+                    <div class="stat-label">Mix total</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="stat-num" id="hist-stat-today">0</div>
+                    <div class="stat-label">Aujourd'hui</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="stat-num" id="hist-stat-videos">0</div>
+                    <div class="stat-label">Vidéos générées</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="stat-num" id="hist-stat-videos-today">0</div>
+                    <div class="stat-label">Vidéos aujourd'hui</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Barre de filtres période (style ClipFusion) -->
+        <div class="card history-filters-card">
+            <div class="history-filters">
+                <button class="hist-period-btn" data-period="today">Aujourd'hui</button>
+                <button class="hist-period-btn" data-period="yesterday">Hier</button>
+                <button class="hist-period-btn" data-period="7d">7 jours</button>
+                <button class="hist-period-btn" data-period="15d">15 jours</button>
+                <button class="hist-period-btn" data-period="30d">30 jours</button>
+                <button class="hist-period-btn active" data-period="all">Depuis toujours</button>
+                <button class="hist-period-btn hist-date-btn" data-period="custom" id="hist-custom-toggle">📅 Date</button>
+
+                <div class="hist-date-range" id="hist-date-range" style="display:none;">
+                    <input type="date" id="hist-start-date" class="hist-date-input">
+                    <span class="hist-date-arrow">→</span>
+                    <input type="date" id="hist-end-date" class="hist-date-input">
+                    <button class="btn-mini-action hist-apply-btn" id="hist-apply-custom">Appliquer</button>
+                </div>
+            </div>
+            <div class="history-filters" style="margin-top: 12px;">
+                <span class="muted small" style="text-transform:uppercase; letter-spacing:0.06em;">Filtrer :</span>
+                <select id="hist-filter-team" class="dest-select" style="min-width: 140px;">
+                    <option value="">Toutes équipes</option>
+                    <option value="geelark">Geelark</option>
+                    <option value="instagram">Instagram</option>
+                </select>
+                <select id="hist-filter-va" class="dest-select" style="min-width: 180px;">
+                    <option value="">Tous VAs</option>
+                </select>
+                <button class="btn-mini-action" id="hist-refresh">🔄 Rafraîchir</button>
+            </div>
+        </div>
+
+        <!-- Tableau résultats -->
+        <div class="card history-results-card">
+            <div id="history-list" class="history-list"></div>
+        </div>
     </section>
 
     </main>

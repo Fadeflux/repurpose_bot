@@ -2208,6 +2208,218 @@ updatePhonePreview();
 syncPositionButtons();
 syncSizeButtons();
 
+// ============ HISTORIQUE (étape 6) ============
+const histState = {
+    period: 'all',
+    startDate: null,
+    endDate: null,
+    team: '',
+    vaName: '',
+};
+
+async function loadHistoryStats() {
+    try {
+        const r = await fetch(API + '/history/stats');
+        const data = await r.json();
+        document.getElementById('hist-stat-total').textContent = data.total || 0;
+        document.getElementById('hist-stat-today').textContent = data.today || 0;
+        document.getElementById('hist-stat-videos').textContent = data.videos_total || 0;
+        document.getElementById('hist-stat-videos-today').textContent = data.videos_today || 0;
+    } catch (e) {
+        console.warn('history stats failed', e);
+    }
+}
+
+async function loadHistory() {
+    const list = document.getElementById('history-list');
+    list.innerHTML = '<div class="history-empty"><div class="empty-icon">⏳</div><div>Chargement...</div></div>';
+
+    const params = new URLSearchParams({
+        period: histState.period,
+        limit: 200,
+    });
+    if (histState.period === 'custom' && histState.startDate) {
+        params.set('start_date', histState.startDate);
+        if (histState.endDate) params.set('end_date', histState.endDate);
+    }
+    if (histState.team) params.set('team', histState.team);
+    if (histState.vaName) params.set('va_name', histState.vaName);
+
+    try {
+        const r = await fetch(API + '/history/?' + params.toString());
+        const data = await r.json();
+        renderHistoryList(data.batches || []);
+    } catch (e) {
+        list.innerHTML = '<div class="history-empty"><div class="empty-icon">❌</div><div>Erreur de chargement</div></div>';
+    }
+}
+
+function renderHistoryList(batches) {
+    const list = document.getElementById('history-list');
+    if (!batches || batches.length === 0) {
+        list.innerHTML = '<div class="history-empty"><div class="empty-icon">📭</div><div>Aucun mix dans l\'historique pour cette période</div></div>';
+        return;
+    }
+    // Header row
+    const rows = ['<div class="history-row history-header">' +
+        '<div>VA</div>' +
+        '<div>Équipe</div>' +
+        '<div>Date</div>' +
+        '<div>Vidéos</div>' +
+        '<div>Device</div>' +
+        '<div>Drive</div>' +
+        '<div></div>' +
+        '</div>'];
+
+    batches.forEach(b => {
+        const date = b.created_at ? new Date(b.created_at) : null;
+        const dateStr = date ? date.toLocaleString('fr-FR', {
+            day: '2-digit', month: '2-digit', year: '2-digit',
+            hour: '2-digit', minute: '2-digit'
+        }) : '—';
+        const team = (b.team || '').toLowerCase();
+        const teamBadge = team
+            ? `<span class="hist-team-badge ${team}">${escapeHtml(team)}</span>`
+            : '<span class="muted small">—</span>';
+        const vidNum = b.videos_uploaded || b.videos_count || 0;
+        const totalNum = b.videos_count || 0;
+        const vidDisplay = vidNum === totalNum
+            ? `<span class="vid-num">${vidNum}</span>`
+            : `<span class="vid-num">${vidNum}</span><span class="vid-label">/ ${totalNum}</span>`;
+        const deviceLabel = b.device_choice || '—';
+        const driveBtn = b.drive_folder_url
+            ? `<a class="hist-drive-btn" href="${escapeHtml(b.drive_folder_url)}" target="_blank">📁 Voir Drive</a>`
+            : `<span class="hist-drive-btn disabled">📁 Pas de Drive</span>`;
+
+        const vaCell = b.va_name
+            ? escapeHtml(b.va_name)
+            : '<span class="muted small">— Aucun VA —</span>';
+
+        rows.push(`
+            <div class="history-row" data-id="${escapeHtml(b.id)}">
+                <div class="hist-cell-va">${vaCell}</div>
+                <div class="hist-cell-team">${teamBadge}</div>
+                <div class="hist-cell-date">${escapeHtml(dateStr)}</div>
+                <div class="hist-cell-videos">${vidDisplay}</div>
+                <div class="hist-cell-device" title="${escapeHtml(deviceLabel)}">${escapeHtml(deviceLabel)}</div>
+                <div>${driveBtn}</div>
+                <div><button class="hist-delete-btn" data-id="${escapeHtml(b.id)}" title="Supprimer de l'historique">✕</button></div>
+            </div>
+        `);
+    });
+    list.innerHTML = rows.join('');
+
+    // Handlers delete
+    list.querySelectorAll('.hist-delete-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            if (!confirm('Supprimer ce batch de l\'historique ? (le dossier Drive ne sera PAS effacé)')) return;
+            try {
+                const r = await fetch(API + '/history/' + id, { method: 'DELETE' });
+                if (r.ok) {
+                    btn.closest('.history-row').remove();
+                    await loadHistoryStats();
+                    toast('🗑️ Batch supprimé');
+                } else {
+                    toast('Suppression échouée', true);
+                }
+            } catch (err) {
+                toast('Erreur: ' + err.message, true);
+            }
+        });
+    });
+}
+
+// Period buttons handlers
+document.querySelectorAll('.hist-period-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const period = btn.dataset.period;
+        document.querySelectorAll('.hist-period-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const dateRange = document.getElementById('hist-date-range');
+        if (period === 'custom') {
+            dateRange.style.display = 'flex';
+            // Ne charge pas tant qu'on a pas cliqué Appliquer
+            return;
+        }
+        dateRange.style.display = 'none';
+        histState.period = period;
+        histState.startDate = null;
+        histState.endDate = null;
+        loadHistory();
+    });
+});
+
+// Apply custom date
+document.getElementById('hist-apply-custom')?.addEventListener('click', () => {
+    const sd = document.getElementById('hist-start-date').value;
+    const ed = document.getElementById('hist-end-date').value;
+    if (!sd) {
+        toast('Sélectionne une date de début', true);
+        return;
+    }
+    histState.period = 'custom';
+    histState.startDate = sd;
+    histState.endDate = ed || sd;
+    loadHistory();
+});
+
+// Filter team / VA
+document.getElementById('hist-filter-team')?.addEventListener('change', (e) => {
+    histState.team = e.target.value;
+    populateHistVAFilter();
+    loadHistory();
+});
+document.getElementById('hist-filter-va')?.addEventListener('change', (e) => {
+    histState.vaName = e.target.value;
+    loadHistory();
+});
+
+document.getElementById('hist-refresh')?.addEventListener('click', () => {
+    loadHistoryStats();
+    loadHistory();
+});
+
+function populateHistVAFilter() {
+    const sel = document.getElementById('hist-filter-va');
+    if (!sel) return;
+    const team = histState.team;
+    const list = team ? (state.vasByTeam[team] || [])
+                      : [...(state.vasByTeam.geelark || []), ...(state.vasByTeam.instagram || [])];
+    // Dédoublonne par nom
+    const seen = new Set();
+    const unique = list.filter(v => {
+        if (seen.has(v.name)) return false;
+        seen.add(v.name);
+        return true;
+    });
+    sel.innerHTML = '<option value="">Tous VAs</option>';
+    unique.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.name;
+        opt.textContent = v.name;
+        sel.appendChild(opt);
+    });
+    if (histState.vaName && unique.some(v => v.name === histState.vaName)) {
+        sel.value = histState.vaName;
+    } else {
+        histState.vaName = '';
+    }
+}
+
+// Charge l'historique quand on switch sur l'étape 6
+const navSteps = document.querySelectorAll('.step[data-step]');
+navSteps.forEach(s => {
+    s.addEventListener('click', () => {
+        if (s.dataset.step === '6') {
+            populateHistVAFilter();
+            loadHistoryStats();
+            loadHistory();
+        }
+    });
+});
+
 // Initial load
 refreshAll();
 loadVAs();
