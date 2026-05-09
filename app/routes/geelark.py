@@ -15,7 +15,7 @@ logger = get_logger("geelark_routes")
 
 router = APIRouter(prefix="/api/geelark", tags=["geelark"])
 
-UPLOAD_TMP_DIR = Path("/tmp/geelark_uploads")
+from app.utils.storage_paths import GEELARK_UPLOAD_DIR as UPLOAD_TMP_DIR
 UPLOAD_TMP_DIR.mkdir(parents=True, exist_ok=True)
 
 
