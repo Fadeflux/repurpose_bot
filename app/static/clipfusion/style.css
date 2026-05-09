@@ -2922,3 +2922,99 @@ button[onclick*="launchMix"], button[id="launch-mix"] {
     .hist-cell-team, .hist-cell-device { font-size: 11px; }
     .history-stats { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ===================================================================
+   SPOOF SUMMARY CARD (compacte) + MODAL (sliders complet)
+   ================================================================= */
+
+.spoof-summary-card {
+    margin-top: 12px;
+    padding: 16px 22px !important;
+}
+.spoof-summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+.spoof-summary-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+.spoof-summary-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.spoof-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    transition: all var(--t-fast);
+}
+.spoof-chip.active {
+    background: var(--cyan-soft);
+    border-color: var(--cyan);
+    color: var(--cyan);
+}
+.spoof-chip-stat {
+    background: linear-gradient(135deg, var(--cyan-soft), rgba(156, 93, 255, 0.10));
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    font-weight: 700;
+}
+.spoof-chip .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+}
+
+.btn-spoof-config {
+    background: linear-gradient(135deg, var(--cyan), var(--purple));
+    color: white;
+    border: none;
+    border-radius: var(--r-md);
+    padding: 9px 18px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all var(--t-fast);
+    box-shadow: 0 4px 14px rgba(88, 101, 242, 0.35);
+    flex-shrink: 0;
+}
+.btn-spoof-config:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(88, 101, 242, 0.5);
+}
+
+/* Spoof Modal */
+.spoof-modal {
+    max-width: 1100px;
+    width: 92vw;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+}
+.spoof-modal .modal-body {
+    padding: 24px 28px 28px;
+    overflow-y: auto;
+}
+
