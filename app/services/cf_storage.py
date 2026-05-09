@@ -738,6 +738,9 @@ def list_batches(
     where = []
     params: List[Any] = []
 
+    # Cache les batchs avec 0 vidéos générées (mix échoué, fichiers manquants, etc.)
+    where.append("videos_count > 0")
+
     if start_date:
         where.append("created_at >= %s")
         params.append(start_date + " 00:00:00")
@@ -787,6 +790,34 @@ def delete_batch(batch_id: str) -> bool:
     except Exception as e:
         logger.error(f"delete_batch failed: {e}")
         return False
+
+
+def count_va_videos_recent(va_name: str, days: int = 3) -> int:
+    """
+    Compte le nombre total de vidéos générées avec succès par un VA
+    sur les N derniers jours. Utilisé pour le rate limiting Discord.
+
+    Compte uniquement videos_count > 0 (les mixes qui ont vraiment produit
+    quelque chose, pas les batchs échoués).
+    """
+    if not is_db_enabled() or not va_name:
+        return 0
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COALESCE(SUM(videos_count), 0) "
+                    "FROM cf_batches "
+                    "WHERE va_name = %s "
+                    "AND videos_count > 0 "
+                    "AND created_at >= NOW() - INTERVAL '%s days'",
+                    (va_name, days),
+                )
+                row = cur.fetchone()
+                return int(row[0] or 0) if row else 0
+    except Exception as e:
+        logger.error(f"count_va_videos_recent failed: {e}")
+        return 0
 
 
 def get_batches_stats() -> Dict[str, Any]:

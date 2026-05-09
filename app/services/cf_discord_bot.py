@@ -139,6 +139,109 @@ def _detect_team_from_guild(guild_id: Optional[int]) -> str:
 
 
 # ============================================================================
+# RATE LIMITING par VA (anti-abus)
+# ============================================================================
+def _rate_limit_config() -> tuple:
+    """
+    Retourne (max_videos, period_days) pour le rate limit.
+    Variables d'env :
+      CF_RATE_LIMIT_VIDEOS  : quota de vidéos sur la période (default 300)
+      CF_RATE_LIMIT_DAYS    : période en jours (default 3)
+    Si CF_RATE_LIMIT_VIDEOS = 0, le rate limit est désactivé.
+    """
+    try:
+        max_v = int(os.environ.get("CF_RATE_LIMIT_VIDEOS", "300"))
+    except Exception:
+        max_v = 300
+    try:
+        days = max(1, int(os.environ.get("CF_RATE_LIMIT_DAYS", "3")))
+    except Exception:
+        days = 3
+    return max_v, days
+
+
+def _is_admin(member) -> bool:
+    """Bypass admin : les administrateurs Discord ignorent le rate limit."""
+    if not isinstance(member, discord.Member):
+        return False
+    try:
+        return bool(member.guild_permissions.administrator)
+    except Exception:
+        return False
+
+
+def _check_rate_limit(va_name: str, requested_qty: int) -> tuple:
+    """
+    Vérifie si un VA peut faire une demande de N vidéos.
+    Retourne (allowed: bool, used: int, limit: int, remaining: int).
+
+    Compte uniquement les vidéos GÉNÉRÉES avec succès (videos_count > 0)
+    sur les CF_RATE_LIMIT_DAYS derniers jours.
+    """
+    max_v, days = _rate_limit_config()
+
+    # Rate limit désactivé si max=0
+    if max_v <= 0:
+        return (True, 0, 0, 0)
+
+    try:
+        used = cf_storage.count_va_videos_recent(va_name, days=days)
+    except Exception as e:
+        logger.warning(f"count_va_videos_recent failed pour {va_name}: {e}")
+        # En cas d'échec DB, on laisse passer (fail-open) pour pas bloquer le service
+        return (True, 0, max_v, max_v)
+
+    remaining = max(0, max_v - used)
+    # Le VA ne peut demander que ce qu'il lui reste
+    allowed = (used + requested_qty) <= max_v
+    return (allowed, used, max_v, remaining)
+
+
+async def _notify_admin_rate_limit_exceeded(
+    bot, team: str, user_name: str, user_id: int,
+    requested: int, used: int, limit: int, days: int,
+):
+    """
+    Envoie une notif dans le canal admin (#spoofbot-notifs) quand un VA dépasse
+    le rate limit. Permet aux managers/CEO de surveiller les VAs trop agressifs.
+    """
+    try:
+        # Récupère le canal selon l'équipe (réutilise la même logique que les notifs batch)
+        env_name = {
+            "geelark": "DISCORD_BATCH_CHANNEL_ID_GEELARK",
+            "instagram": "DISCORD_BATCH_CHANNEL_ID_INSTAGRAM",
+        }.get(team, "DISCORD_BATCH_CHANNEL_ID")
+
+        channel_id_str = os.environ.get(env_name, "").strip()
+        if not channel_id_str:
+            return
+        channel = bot.get_channel(int(channel_id_str))
+        if not channel:
+            return
+
+        embed = discord.Embed(
+            title="🚫 Rate limit dépassé",
+            description=f"Un VA a tenté de demander des vidéos au-delà du quota.",
+            color=0xef4444,
+        )
+        embed.add_field(name="👤 VA", value=f"<@{user_id}> ({user_name})", inline=True)
+        embed.add_field(name="📊 Équipe", value=team, inline=True)
+        embed.add_field(
+            name="📈 Quota",
+            value=f"{used}/{limit} vidéos sur {days}j",
+            inline=False,
+        )
+        embed.add_field(
+            name="❌ Demande refusée",
+            value=f"**{requested}** vidéos demandées",
+            inline=True,
+        )
+        await channel.send(embed=embed)
+    except Exception as e:
+        logger.warning(f"Notif admin rate limit échoué: {e}")
+
+
+# ============================================================================
 # QUEUE FIFO : un mix à la fois pour pas exploser Railway
 # ============================================================================
 @dataclass
@@ -437,6 +540,42 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 msg = f"❌ Modèle ID **{modele}** introuvable.\nAucun modèle créé pour l'instant. Demande à l'admin."
             await interaction.response.send_message(msg, ephemeral=True)
             return
+
+        # 4b. RATE LIMIT (anti-abus) — bypass admin
+        va_name_for_check = interaction.user.display_name or interaction.user.name
+        is_admin_user = _is_admin(interaction.user)
+        if not is_admin_user:
+            allowed, used, limit, remaining = _check_rate_limit(va_name_for_check, quantite)
+            if not allowed:
+                _, days = _rate_limit_config()
+                if remaining > 0:
+                    msg = (
+                        f"🚫 **Rate limit atteint.**\n"
+                        f"Tu as déjà demandé **{used}/{limit}** vidéos sur les **{days}** derniers jours.\n"
+                        f"Tu peux encore demander **{remaining}** vidéos avant ta prochaine fenêtre.\n"
+                        f"_(quota réinitialisé progressivement au fil des jours)_"
+                    )
+                else:
+                    msg = (
+                        f"🚫 **Rate limit atteint.**\n"
+                        f"Tu as épuisé ton quota de **{limit}** vidéos sur les **{days}** derniers jours.\n"
+                        f"Reviens dans quelques jours, le quota se réinitialise progressivement."
+                    )
+                await interaction.response.send_message(msg, ephemeral=True)
+                # Notif admin dans le canal #spoofbot-notifs
+                guild_id = interaction.guild_id if interaction.guild_id else None
+                team_for_notif = _detect_team_from_guild(guild_id)
+                await _notify_admin_rate_limit_exceeded(
+                    bot=interaction.client,
+                    team=team_for_notif,
+                    user_name=va_name_for_check,
+                    user_id=interaction.user.id,
+                    requested=quantite,
+                    used=used,
+                    limit=limit,
+                    days=days,
+                )
+                return
 
         # 5. Construit la requête + ajoute dans la queue
         # NOUVEAU : détection auto de l'équipe selon le serveur Discord
