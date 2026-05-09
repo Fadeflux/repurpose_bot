@@ -67,7 +67,7 @@ body {
     background-attachment: fixed;
     color: var(--text);
     min-height: 100vh;
-    padding: 20px 20px 160px;
+    padding: 20px 20px 200px;
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
@@ -2710,4 +2710,18 @@ kbd {
     .mix-row-split {
         grid-template-columns: 1fr;
     }
+}
+
+/* Bouton "Créer template" et boutons primaires en fin de section :
+   garantir un espace minimum sous eux pour pas être caché par la bottom bar */
+.step-panel .btn-primary,
+#btn-create-template,
+.step-panel .btn.primary {
+    margin-bottom: 24px;
+    scroll-margin-bottom: 120px;
+}
+
+/* Force la dernière card/élément de chaque step-panel à avoir une marge en bas */
+.step-panel > *:last-child {
+    margin-bottom: 32px;
 }
