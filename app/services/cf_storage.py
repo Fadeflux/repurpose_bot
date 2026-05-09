@@ -103,6 +103,25 @@ def init_schema() -> bool:
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_cf_outputs_created ON cf_outputs(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS cf_batches (
+        id TEXT PRIMARY KEY,
+        va_name TEXT DEFAULT '',
+        team TEXT DEFAULT '',
+        device_choice TEXT DEFAULT '',
+        videos_count INTEGER DEFAULT 0,
+        videos_uploaded INTEGER DEFAULT 0,
+        drive_folder_id TEXT DEFAULT '',
+        drive_folder_url TEXT DEFAULT '',
+        drive_folder_name TEXT DEFAULT '',
+        va_email TEXT DEFAULT '',
+        discord_notified BOOLEAN DEFAULT FALSE,
+        duration_seconds REAL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_cf_batches_created ON cf_batches(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_cf_batches_va ON cf_batches(va_name);
+    CREATE INDEX IF NOT EXISTS idx_cf_batches_team ON cf_batches(team);
     """
 
     try:
@@ -580,3 +599,163 @@ def clear_outputs() -> int:
     except Exception as e:
         logger.error(f"clear_outputs failed: {e}")
         return 0
+
+
+# ---------------------------------------------------------------------------
+# BATCHES (historique des mix lancés)
+# ---------------------------------------------------------------------------
+def _row_to_batch(row) -> Dict[str, Any]:
+    return {
+        "id": row[0],
+        "va_name": row[1] or "",
+        "team": row[2] or "",
+        "device_choice": row[3] or "",
+        "videos_count": int(row[4] or 0),
+        "videos_uploaded": int(row[5] or 0),
+        "drive_folder_id": row[6] or "",
+        "drive_folder_url": row[7] or "",
+        "drive_folder_name": row[8] or "",
+        "va_email": row[9] or "",
+        "discord_notified": bool(row[10]),
+        "duration_seconds": float(row[11] or 0),
+        "created_at": row[12].isoformat() if row[12] else None,
+    }
+
+
+def add_batch(
+    va_name: str = "",
+    team: str = "",
+    device_choice: str = "",
+    videos_count: int = 0,
+    videos_uploaded: int = 0,
+    drive_folder_id: str = "",
+    drive_folder_url: str = "",
+    drive_folder_name: str = "",
+    va_email: str = "",
+    discord_notified: bool = False,
+    duration_seconds: float = 0.0,
+) -> Optional[Dict[str, Any]]:
+    """Enregistre un batch de mix dans l'historique."""
+    if not is_db_enabled():
+        return None
+    bid = gen_id()
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO cf_batches "
+                    "(id, va_name, team, device_choice, videos_count, videos_uploaded, "
+                    " drive_folder_id, drive_folder_url, drive_folder_name, va_email, "
+                    " discord_notified, duration_seconds) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "RETURNING id, va_name, team, device_choice, videos_count, videos_uploaded, "
+                    "drive_folder_id, drive_folder_url, drive_folder_name, va_email, "
+                    "discord_notified, duration_seconds, created_at",
+                    (bid, va_name, team, device_choice, videos_count, videos_uploaded,
+                     drive_folder_id, drive_folder_url, drive_folder_name, va_email,
+                     discord_notified, duration_seconds),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return _row_to_batch(row) if row else None
+    except Exception as e:
+        logger.error(f"add_batch failed: {e}")
+        return None
+
+
+def list_batches(
+    period_days: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    va_name: Optional[str] = None,
+    team: Optional[str] = None,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    """
+    Liste les batches avec filtres optionnels.
+
+    period_days : nb de jours en arrière depuis aujourd'hui (1 = aujourd'hui, 7 = 7 jours, etc.)
+    start_date / end_date : ISO dates (YYYY-MM-DD) — surcharge period_days si fournis
+    va_name : filtre par VA
+    team : filtre par équipe
+    """
+    if not is_db_enabled():
+        return []
+
+    where = []
+    params: List[Any] = []
+
+    if start_date:
+        where.append("created_at >= %s")
+        params.append(start_date + " 00:00:00")
+    if end_date:
+        where.append("created_at <= %s")
+        params.append(end_date + " 23:59:59")
+    if not start_date and not end_date and period_days is not None and period_days > 0:
+        where.append("created_at >= NOW() - INTERVAL '%s days'")
+        params.append(period_days)
+    if va_name:
+        where.append("va_name = %s")
+        params.append(va_name)
+    if team:
+        where.append("team = %s")
+        params.append(team)
+
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = (
+        "SELECT id, va_name, team, device_choice, videos_count, videos_uploaded, "
+        "drive_folder_id, drive_folder_url, drive_folder_name, va_email, "
+        "discord_notified, duration_seconds, created_at "
+        f"FROM cf_batches {where_sql} "
+        "ORDER BY created_at DESC LIMIT %s"
+    )
+    params.append(int(limit))
+
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return [_row_to_batch(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.error(f"list_batches failed: {e}")
+        return []
+
+
+def delete_batch(batch_id: str) -> bool:
+    if not is_db_enabled():
+        return False
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM cf_batches WHERE id = %s", (batch_id,))
+                deleted = cur.rowcount > 0
+            conn.commit()
+        return deleted
+    except Exception as e:
+        logger.error(f"delete_batch failed: {e}")
+        return False
+
+
+def get_batches_stats() -> Dict[str, Any]:
+    """Stats globales pour le panneau historique."""
+    if not is_db_enabled():
+        return {"total": 0, "today": 0, "videos_total": 0}
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*), COALESCE(SUM(videos_uploaded),0) FROM cf_batches")
+                total, vids = cur.fetchone()
+                cur.execute(
+                    "SELECT COUNT(*), COALESCE(SUM(videos_uploaded),0) "
+                    "FROM cf_batches WHERE created_at >= CURRENT_DATE"
+                )
+                today, vids_today = cur.fetchone()
+        return {
+            "total": int(total or 0),
+            "today": int(today or 0),
+            "videos_total": int(vids or 0),
+            "videos_today": int(vids_today or 0),
+        }
+    except Exception as e:
+        logger.error(f"get_batches_stats failed: {e}")
+        return {"total": 0, "today": 0, "videos_total": 0, "videos_today": 0}
