@@ -386,7 +386,7 @@
             </div>
         </div>
 
-        <!-- Row 1: variantes max + durée vidéo -->
+        <!-- Row 1: variantes max + spoof résumé -->
         <div class="mix-row">
             <div class="card">
                 <div class="row-between">
@@ -397,6 +397,24 @@
                 <div class="muted" id="max-possible">Max possible: 0</div>
             </div>
 
+            <!-- Paramètres de spoof : RÉSUMÉ COMPACT -->
+            <div class="card spoof-summary-card">
+                <div class="spoof-summary-row">
+                    <div class="spoof-summary-left">
+                        <label class="card-label" style="margin:0;">⚙️ PARAMÈTRES DE SPOOF</label>
+                        <div class="spoof-summary-chips" id="spoof-summary-chips">
+                            <!-- Chips remplies par JS -->
+                        </div>
+                    </div>
+                    <button class="btn-spoof-config" id="btn-spoof-config" type="button">
+                        <span>⚙️</span> Configurer
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 2: durée vidéo (toggle simple) -->
+        <div class="mix-row">
             <div class="card">
                 <div class="row-between">
                     <label class="card-label">⏱ DURÉE VIDÉO</label>
@@ -491,21 +509,6 @@
                 <div class="muted small" id="cf-va-hint" style="margin-top:8px;">
                     Si un VA est sélectionné, le batch sera partagé avec son Drive et notifié sur Discord.
                 </div>
-            </div>
-        </div>
-
-        <!-- Row Paramètres de spoof : RÉSUMÉ COMPACT (cliquer pour ouvrir le modal complet) -->
-        <div class="card spoof-summary-card">
-            <div class="spoof-summary-row">
-                <div class="spoof-summary-left">
-                    <span class="card-label" style="margin:0;">⚙️ PARAMÈTRES DE SPOOF</span>
-                    <div class="spoof-summary-chips" id="spoof-summary-chips">
-                        <!-- Chips remplies par JS -->
-                    </div>
-                </div>
-                <button class="btn-spoof-config" id="btn-spoof-config" type="button">
-                    <span>⚙️</span> Configurer
-                </button>
             </div>
         </div>
 
