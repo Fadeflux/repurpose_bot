@@ -57,7 +57,11 @@
 /* ============================================
    BASE
 ============================================ */
-html, body { height: 100%; }
+html, body {
+    /* Safari/Mac : ne PAS mettre height:100% car ça casse le padding-bottom du body
+       (le contenu est tronqué par la bottom-bar fixed même quand padding existe).
+       min-height: 100vh sur body suffit pour que la page remplisse l'écran. */
+}
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
     background:
