@@ -1020,9 +1020,10 @@ US_CITIES_GPS = [
 ]
 
 # Liste des devices iPhone disponibles pour le tirage au 1er /request
+# Note : iPhone 16e retiré (ne supportait que 30 fps, on force 60 fps partout)
 IPHONE_DEVICE_CHOICES = [
     "iphone_17_pro_max", "iphone_17_pro", "iphone_17_air", "iphone_17",
-    "iphone_16_pro_max", "iphone_16_pro", "iphone_16_plus", "iphone_16", "iphone_16e",
+    "iphone_16_pro_max", "iphone_16_pro", "iphone_16_plus", "iphone_16",
 ]
 
 
