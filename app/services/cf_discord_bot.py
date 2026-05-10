@@ -256,6 +256,10 @@ class CFRequest:
     team: str
     # Discord references (résolues à l'exécution)
     interaction: Optional["discord.Interaction"] = None
+    # Compte Insta cible (optionnel) - dict avec username, device_choice, gps_lat, gps_lng, gps_city
+    account: Optional[dict] = None
+    # Timezone du VA pour les fenêtres horaires (benin / madagascar)
+    tz_name: str = "benin"
 
 
 _queue: "asyncio.Queue[CFRequest]" = None  # type: ignore
@@ -366,6 +370,8 @@ async def _process_request(req: CFRequest):
             enabled_filters=None,    # tous activés
             custom_ranges=None,      # plages par défaut
             model_id=req.model_id,
+            account=req.account,     # NOUVEAU : si fourni, active le mode fenêtres
+            tz_name=req.tz_name,     # NOUVEAU : timezone du VA (benin/madagascar)
         ):
             t = ev.get("type")
             # FIX : le mixer émet "item_done" pour chaque vidéo terminée (pas "progress")
@@ -486,8 +492,14 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
     @app_commands.describe(
         quantite="Nombre de vidéos à générer (max 200)",
         modele="ID du modèle (créatrice). Liste les modèles avec /models",
+        compte="Username du compte Insta (sans @). Active le mode fenêtres horaires + device locked.",
     )
-    async def request_cmd(interaction: "discord.Interaction", quantite: int, modele: int):
+    async def request_cmd(
+        interaction: "discord.Interaction",
+        quantite: int,
+        modele: int,
+        compte: Optional[str] = None,
+    ):
         # 1. Filtrage canal si configuré
         allowed = _get_request_channel_ids()
         if allowed and interaction.channel_id not in allowed:
@@ -583,6 +595,46 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         guild_id = interaction.guild_id if interaction.guild_id else None
         team = _detect_team_from_guild(guild_id)
 
+        # Résolution du compte si fourni (sinon mode legacy : random complet, sans fenêtres)
+        account_data = None
+        account_msg_extra = ""
+        is_new_account = False
+        if compte:
+            # Nettoie le username (vire @ et espaces)
+            clean_username = compte.strip().lstrip("@").strip()
+            if clean_username:
+                # Tente de récupérer le compte ; sinon le crée avec random device + GPS USA
+                existing = cf_storage.find_account(clean_username, modele)
+                if existing:
+                    account_data = existing
+                else:
+                    is_new_account = True
+                    account_data = cf_storage.create_account(
+                        username=clean_username,
+                        model_id=modele,
+                        va_discord_id=str(interaction.user.id),
+                        va_name=interaction.user.display_name or interaction.user.name,
+                    )
+
+                if account_data:
+                    if is_new_account:
+                        account_msg_extra = (
+                            f"\n✨ Nouveau compte créé : @**{account_data['username']}**\n"
+                            f"📱 Device : **{account_data['device_choice'].replace('_', ' ').title()}**\n"
+                            f"📍 GPS : **{account_data['gps_city']}**"
+                        )
+                    else:
+                        account_msg_extra = (
+                            f"\n🔒 Compte connu : @**{account_data['username']}** "
+                            f"({account_data['device_choice'].replace('_', ' ').title()} · {account_data['gps_city']})"
+                        )
+
+        # Détermine la timezone selon la team (geelark = Bénin par défaut)
+        # On peut surcharger via env var CF_TZ_GEELARK / CF_TZ_INSTAGRAM
+        tz_name = os.environ.get(f"CF_TZ_{team.upper()}", "benin").lower().strip()
+        if tz_name not in ("benin", "madagascar"):
+            tz_name = "benin"
+
         # Calcul ETA AVANT d'ajouter à la queue (pour pas se compter soi-même 2 fois)
         eta_seconds = _compute_queue_eta_seconds(quantite)
         eta_str = _format_eta(eta_seconds)
@@ -596,6 +648,8 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             model_id=modele,
             team=team,
             interaction=interaction,
+            account=account_data,
+            tz_name=tz_name,
         )
         _pending.append(req)
         await _queue.put(req)
@@ -625,12 +679,39 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             position_msg = ""
             if position > 1:
                 position_msg = f"\n⏳ Position dans la file : **{position}**"
-            await user.send(
-                f"🎬 **Ta demande est en préparation !**\n"
-                f"📊 **{quantite}** vidéos · modèle **{model['label']}** · équipe **{team}**\n"
-                f"⏱️ Tu vas recevoir ton drive dans environ **{eta_str}**{position_msg}\n"
-                f"Je t'enverrai le lien Drive dès que c'est prêt 🚀"
-            )
+
+            # Construction du message DM selon si compte ou pas
+            if account_data:
+                # Calcul de la répartition fenêtres
+                n_per = quantite // 3
+                extra = quantite % 3
+                n_matin = n_per + extra
+                n_soir = n_per
+                n_nuit = n_per
+                tz_label = "Bénin GMT+1" if tz_name == "benin" else "Madagascar GMT+3"
+                account_block = (
+                    f"📍 Compte : @**{account_data['username']}**\n"
+                    f"📱 Device : **{account_data['device_choice'].replace('_', ' ').title()}**\n"
+                    f"🌍 GPS : **{account_data['gps_city']}**\n"
+                    f"\n📦 Répartition automatique ({tz_label}) :\n"
+                    f"  🌅 **{n_matin}** vidéos · fenêtre Matin (8h-9h)\n"
+                    f"  🌇 **{n_soir}** vidéos · fenêtre Soir (16h-17h)\n"
+                    f"  🌙 **{n_nuit}** vidéos · fenêtre Nuit (22h-23h)\n"
+                )
+                await user.send(
+                    f"🎬 **Ta demande est en préparation !**\n"
+                    f"📊 **{quantite}** vidéos · modèle **{model['label']}** · équipe **{team}**\n"
+                    f"{account_block}"
+                    f"⏱️ Tu vas recevoir ton drive dans environ **{eta_str}**{position_msg}\n"
+                    f"Le drive contiendra 3 sous-dossiers (matin/soir/nuit) 🚀"
+                )
+            else:
+                await user.send(
+                    f"🎬 **Ta demande est en préparation !**\n"
+                    f"📊 **{quantite}** vidéos · modèle **{model['label']}** · équipe **{team}**\n"
+                    f"⏱️ Tu vas recevoir ton drive dans environ **{eta_str}**{position_msg}\n"
+                    f"Je t'enverrai le lien Drive dès que c'est prêt 🚀"
+                )
         except discord.Forbidden:
             logger.warning(f"DM 'en préparation' refusé pour user {interaction.user.id} (DMs désactivés)")
         except Exception as e:
@@ -640,6 +721,53 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         global _worker_task
         if _worker_task is None or _worker_task.done():
             _worker_task = asyncio.create_task(_worker_loop())
+
+    # Autocomplete pour le paramètre `compte` : propose les comptes que le VA
+    # a déjà utilisés pour le modèle sélectionné.
+    @request_cmd.autocomplete("compte")
+    async def compte_autocomplete(
+        interaction: "discord.Interaction",
+        current: str,
+    ) -> List[app_commands.Choice[str]]:
+        try:
+            # Récupère le model_id depuis les options déjà saisies (modele est requis)
+            modele_value = None
+            for opt in (interaction.data.get("options") or []):
+                if opt.get("name") == "modele":
+                    modele_value = opt.get("value")
+                    break
+
+            # Liste les comptes : filtré par modèle si dispo, sinon tous les comptes du VA
+            if modele_value:
+                accounts = cf_storage.list_accounts(model_id=int(modele_value))
+                # Sécurité : on ne propose que les comptes appartenant à ce VA
+                # (sauf admin qui voit tout)
+                if not _is_admin(interaction.user):
+                    accounts = [
+                        a for a in accounts
+                        if a.get("va_discord_id") == str(interaction.user.id)
+                    ]
+            else:
+                accounts = cf_storage.list_accounts(va_discord_id=str(interaction.user.id))
+
+            # Filtre par texte tapé par le user
+            cur_lower = (current or "").strip().lower().lstrip("@")
+            filtered = [
+                a for a in accounts
+                if cur_lower in a.get("username", "").lower()
+            ]
+
+            # Discord limit : max 25 choix dans un autocomplete
+            return [
+                app_commands.Choice(
+                    name=f"@{a['username']} ({a['device_choice'].replace('_', ' ')[:18]})",
+                    value=a["username"],
+                )
+                for a in filtered[:25]
+            ]
+        except Exception as e:
+            logger.warning(f"compte autocomplete failed: {e}")
+            return []
 
     @bot.tree.command(name="models", description="Liste les modèles auxquels tu as accès")
     async def models_cmd(interaction: "discord.Interaction"):

@@ -146,6 +146,33 @@ def create_batch_folder(batch_name: str) -> Optional[str]:
         return None
 
 
+def create_subfolder(parent_folder_id: str, name: str) -> Optional[str]:
+    """
+    Crée un sous-dossier à l'intérieur d'un dossier Drive existant.
+    Utilisé pour organiser les batchs par fenêtre horaire (matin/soir/nuit).
+    Retourne l'ID du sous-dossier ou None si échec.
+    """
+    client = get_drive_client()
+    if not client or not parent_folder_id or not name:
+        return None
+    try:
+        metadata = {
+            "name": name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [parent_folder_id],
+        }
+        folder = client.files().create(
+            body=metadata,
+            fields="id",
+            supportsAllDrives=True,
+        ).execute()
+        logger.info(f"Sous-dossier Drive créé : {name} (parent={parent_folder_id}) -> {folder['id']}")
+        return folder["id"]
+    except Exception as e:
+        logger.error(f"Erreur création sous-dossier Drive : {e}")
+        return None
+
+
 def upload_file(
     local_path: Path,
     folder_id: str,

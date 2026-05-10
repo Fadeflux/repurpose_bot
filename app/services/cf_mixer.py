@@ -615,8 +615,23 @@ def mix_batch_stream(
     enabled_filters: Optional[List[str]] = None,
     custom_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
     model_id: Optional[int] = None,
+    account: Optional[Dict[str, Any]] = None,
+    tz_name: str = "benin",
 ) -> Generator[Dict[str, Any], None, None]:
-    """Streaming version yielding progress events."""
+    """
+    Streaming version yielding progress events.
+
+    Si `account` est fourni (dict avec 'username', 'device_choice', 'gps_lat',
+    'gps_lng'), le mix utilise :
+    - Le device LOCKÉ du compte (pas de random)
+    - Le GPS LOCKÉ du compte (avec petit jitter)
+    - Découpe les vidéos en 3 fenêtres horaires (matin 9h / soir 17h / nuit 23h)
+      heure locale du VA (tz_name = 'benin' ou 'madagascar')
+    - Surplus si N pas divisible par 3 → matin reçoit l'extra
+    - Drive output organisé en 3 sous-dossiers
+
+    Sans `account`, le comportement reste comme avant (random complet).
+    """
     if not templates or not videos:
         yield {"type": "log", "level": "ERROR", "message": "Aucun template ou vidéo"}
         yield {"type": "done", "outputs": [], "total_elapsed": 0}
@@ -636,6 +651,32 @@ def mix_batch_stream(
     random.shuffle(pairs)
     pairs = pairs[:max_variants] if max_variants > 0 else pairs
     total = len(pairs)
+
+    # Si un compte est fourni, on découpe en 3 fenêtres horaires
+    # window_assignments[i] = (target_hour, window_label) pour la i-ème pair
+    # Si pas de compte, tous à None → comportement legacy (random complet)
+    window_assignments: List[Optional[Tuple[int, str]]] = [None] * total
+    if account and total > 0:
+        # Répartition : matin (1/3 + extra), soir (1/3), nuit (1/3)
+        # ex pour 10 → matin=4, soir=3, nuit=3
+        n_per = total // 3
+        extra = total % 3
+        n_matin = n_per + extra  # le matin reçoit l'extra
+        n_soir = n_per
+        n_nuit = n_per
+        # Les pairs sont déjà shuffled, on assigne séquentiellement
+        for i in range(n_matin):
+            window_assignments[i] = (9, "matin")
+        for i in range(n_matin, n_matin + n_soir):
+            window_assignments[i] = (17, "soir")
+        for i in range(n_matin + n_soir, total):
+            window_assignments[i] = (23, "nuit")
+        yield {"type": "log", "level": "INFO",
+               "message": f"📅 Compte @{account.get('username', '?')} · "
+                          f"device={account.get('device_choice', '?')} · "
+                          f"GPS={account.get('gps_city', '?')}"}
+        yield {"type": "log", "level": "INFO",
+               "message": f"🕐 Répartition fenêtres : matin {n_matin} · soir {n_soir} · nuit {n_nuit} (TZ={tz_name})"}
 
     yield {"type": "init", "total": total, "engine": engine_line}
     yield {"type": "log", "level": "RUN", "message": f"Lancement du mix · {total} variante(s)"}
@@ -674,11 +715,28 @@ def mix_batch_stream(
 
         duration = _get_video_duration(vid["path"]) or 1.0
 
-        # Generate randomized iPhone/Android metadata for THIS variant (unique per output)
-        spoof_meta = metadata_randomizer.random_metadata(device_choice or "mix_random")
-        platform_label = "iPhone" if spoof_meta.get("_platform") == "iphone" else "Android"
-        device_label = spoof_meta.get("model", "?")
-        yield {"type": "log", "level": "INFO", "message": f"Spoofing as {platform_label} {device_label}"}
+        # Generate metadata pour CETTE variante
+        # Si on a un compte avec window_assignment, on utilise device + GPS lockés
+        # + creation_time dans la fenêtre cible. Sinon, comportement legacy random.
+        window = window_assignments[idx] if idx < len(window_assignments) else None
+        if account and window:
+            target_hour, window_label = window
+            spoof_meta = metadata_randomizer.iphone_metadata_for_account(
+                device_choice=account["device_choice"],
+                gps_lat=float(account["gps_lat"]),
+                gps_lng=float(account["gps_lng"]),
+                target_hour=target_hour,
+                tz_name=tz_name,
+            )
+            device_label = spoof_meta.get("model", "?")
+            yield {"type": "log", "level": "INFO",
+                   "message": f"🔒 [{window_label} {target_hour}h] {device_label} · @{account.get('username', '?')}"}
+        else:
+            # Comportement legacy : random complet
+            spoof_meta = metadata_randomizer.random_metadata(device_choice or "mix_random")
+            platform_label = "iPhone" if spoof_meta.get("_platform") == "iphone" else "Android"
+            device_label = spoof_meta.get("model", "?")
+            yield {"type": "log", "level": "INFO", "message": f"Spoofing as {platform_label} {device_label}"}
 
         # Tirage aléatoire des params spoof vidéo (différent à chaque variante)
         # Si enabled_filters est None -> tous activés, sinon seulement ceux listés
@@ -772,6 +830,10 @@ def mix_batch_stream(
             elapsed = time.time() - item_started
             url = f"/output/{out_filename}"
             meta = {"filename": out_filename, "path": str(out_path), "url": url}
+            # Attache la fenêtre horaire pour le rangement Drive en sous-dossiers
+            if window:
+                meta["window_hour"] = window[0]
+                meta["window_label"] = window[1]
             output_metas.append(meta)
             yield {"type": "item_progress", "index": item_idx, "percent": 100, "elapsed": round(elapsed, 1)}
             yield {"type": "item_done", "index": item_idx, "output": meta, "duration": round(elapsed, 2)}
@@ -829,12 +891,31 @@ def mix_batch_stream(
                     folder_url = drive_service.get_folder_link(folder_id)
                     yield {"type": "log", "level": "INFO", "message": f"📁 Drive folder: {folder_url}"}
 
+                    # Si on a un compte avec fenêtres → on crée 3 sous-dossiers
+                    # et on upload chaque vidéo dans son sous-dossier (matin/soir/nuit).
+                    # Sinon, upload direct dans le dossier principal (legacy).
+                    subfolder_ids: Dict[str, str] = {}
+                    if account:
+                        for label, hour in [("matin", 9), ("soir", 17), ("nuit", 23)]:
+                            subname = f"{['01_matin_8h-9h','02_soir_16h-17h','03_nuit_22h-23h'][['matin','soir','nuit'].index(label)]}"
+                            sub_id = drive_service.create_subfolder(folder_id, subname)
+                            if sub_id:
+                                subfolder_ids[label] = sub_id
+                                yield {"type": "log", "level": "INFO", "message": f"📁 Sous-dossier {subname} créé"}
+                            else:
+                                yield {"type": "log", "level": "WARN", "message": f"⚠️ Échec création sous-dossier {subname}, upload dans dossier parent"}
+
                     uploaded_count = 0
                     for i, m in enumerate(output_metas, 1):
                         try:
                             local_path = Path(m["path"])
+                            # Choix du dossier cible : sous-dossier de fenêtre si dispo, sinon principal
+                            target_folder = folder_id
+                            window_label = m.get("window_label")
+                            if account and window_label and window_label in subfolder_ids:
+                                target_folder = subfolder_ids[window_label]
                             yield {"type": "log", "level": "RUN", "message": f"📤 ({i}/{len(output_metas)}) Upload {local_path.name}"}
-                            up = drive_service.upload_file(local_path, folder_id, mime_type="video/mp4")
+                            up = drive_service.upload_file(local_path, target_folder, mime_type="video/mp4")
                             if up:
                                 m["drive_id"] = up.get("id")
                                 m["drive_url"] = up.get("webViewLink", "")
