@@ -421,17 +421,27 @@ async def _say(req: CFRequest, content: str):
     """
     Envoie un follow-up sur l'interaction (visible à tous dans le canal),
     qui s'auto-supprime après CF_CHANNEL_MSG_TTL secondes (60 par défaut).
-    Discord supporte le paramètre delete_after sur followup.send.
+
+    Note : on n'utilise PAS le param `delete_after` de followup.send car certaines
+    versions de discord.py ne le supportent pas pour les Webhooks/Followups.
+    On gère la suppression manuellement via une tâche async.
     """
     try:
         if req.interaction:
             ttl = _channel_msg_ttl()
-            await req.interaction.followup.send(
+            msg = await req.interaction.followup.send(
                 content,
                 ephemeral=False,
-                # delete_after = secondes avant suppression auto par Discord
-                **({"delete_after": float(ttl)} if ttl > 0 else {}),
             )
+            # Suppression auto après TTL (si supportée par la version discord.py)
+            if ttl > 0 and msg:
+                async def _auto_delete():
+                    try:
+                        await asyncio.sleep(ttl)
+                        await msg.delete()
+                    except Exception:
+                        pass  # Message déjà supprimé / canal inaccessible / etc.
+                asyncio.create_task(_auto_delete())
     except Exception as e:
         logger.warning(f"Reply Discord échoué: {e}")
 
@@ -698,11 +708,30 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 f"📩 <@{interaction.user.id}> tu as reçu un DM avec les détails. Position dans la file : **{position}**"
             )
         ttl = _channel_msg_ttl()
-        await interaction.response.send_message(
-            ack,
-            ephemeral=False,
-            **({"delete_after": float(ttl)} if ttl > 0 else {}),
-        )
+        # Note : on essaie d'abord avec delete_after, fallback sans si la version discord.py
+        # ne le supporte pas, puis suppression manuelle via task async
+        ack_message = None
+        try:
+            if ttl > 0:
+                await interaction.response.send_message(
+                    ack,
+                    ephemeral=False,
+                    delete_after=float(ttl),
+                )
+            else:
+                await interaction.response.send_message(ack, ephemeral=False)
+        except TypeError:
+            # Version discord.py qui ne supporte pas delete_after sur ce send : fallback
+            await interaction.response.send_message(ack, ephemeral=False)
+            if ttl > 0:
+                async def _auto_delete_response():
+                    try:
+                        await asyncio.sleep(ttl)
+                        msg = await interaction.original_response()
+                        await msg.delete()
+                    except Exception:
+                        pass
+                asyncio.create_task(_auto_delete_response())
 
         # 7. DM "en préparation" envoyé immédiatement au VA avec l'ETA
         try:
