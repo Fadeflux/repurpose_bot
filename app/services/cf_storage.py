@@ -129,6 +129,23 @@ def init_schema() -> bool:
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_cf_models_id ON cf_models(id);
+
+    CREATE TABLE IF NOT EXISTS cf_accounts (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL,
+        model_id INTEGER NOT NULL,
+        va_discord_id TEXT DEFAULT '',
+        va_name TEXT DEFAULT '',
+        device_choice TEXT NOT NULL,
+        gps_lat REAL NOT NULL,
+        gps_lng REAL NOT NULL,
+        gps_city TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(username, model_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cf_accounts_model ON cf_accounts(model_id);
+    CREATE INDEX IF NOT EXISTS idx_cf_accounts_va ON cf_accounts(va_discord_id);
+    CREATE INDEX IF NOT EXISTS idx_cf_accounts_username ON cf_accounts(username);
     """
 
     try:
@@ -944,3 +961,194 @@ def get_model(model_id: int) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"get_model failed: {e}")
         return None
+
+
+# ---------------------------------------------------------------------------
+# COMPTES INSTAGRAM (cf_accounts)
+# Chaque compte = 1 device locked + 1 GPS locked + 1 modèle associé
+# ---------------------------------------------------------------------------
+# Liste des 10 grandes villes US pour le tirage GPS au 1er /request
+US_CITIES_GPS = [
+    ("Miami, FL",        25.7617,  -80.1918),
+    ("New York, NY",     40.7128,  -74.0060),
+    ("Los Angeles, CA",  34.0522, -118.2437),
+    ("Chicago, IL",      41.8781,  -87.6298),
+    ("Houston, TX",      29.7604,  -95.3698),
+    ("Phoenix, AZ",      33.4484, -112.0740),
+    ("Philadelphia, PA", 39.9526,  -75.1652),
+    ("San Antonio, TX",  29.4241,  -98.4936),
+    ("Dallas, TX",       32.7767,  -96.7970),
+    ("Atlanta, GA",      33.7490,  -84.3880),
+]
+
+# Liste des devices iPhone disponibles pour le tirage au 1er /request
+IPHONE_DEVICE_CHOICES = [
+    "iphone_17_pro_max", "iphone_17_pro", "iphone_17_air", "iphone_17",
+    "iphone_16_pro_max", "iphone_16_pro", "iphone_16_plus", "iphone_16", "iphone_16e",
+]
+
+
+def _row_to_account(row) -> Dict[str, Any]:
+    return {
+        "id": int(row[0]),
+        "username": row[1],
+        "model_id": int(row[2]),
+        "va_discord_id": row[3] or "",
+        "va_name": row[4] or "",
+        "device_choice": row[5],
+        "gps_lat": float(row[6]),
+        "gps_lng": float(row[7]),
+        "gps_city": row[8],
+        "created_at": row[9].isoformat() if row[9] else None,
+    }
+
+
+def find_account(username: str, model_id: int) -> Optional[Dict[str, Any]]:
+    """Cherche un compte par username + model_id (clé unique)."""
+    if not is_db_enabled() or not username or not model_id:
+        return None
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, username, model_id, va_discord_id, va_name, "
+                    "device_choice, gps_lat, gps_lng, gps_city, created_at "
+                    "FROM cf_accounts WHERE username = %s AND model_id = %s",
+                    (username.strip(), int(model_id)),
+                )
+                row = cur.fetchone()
+        return _row_to_account(row) if row else None
+    except Exception as e:
+        logger.error(f"find_account failed: {e}")
+        return None
+
+
+def create_account(
+    username: str,
+    model_id: int,
+    va_discord_id: str = "",
+    va_name: str = "",
+    device_choice: Optional[str] = None,
+    gps_lat: Optional[float] = None,
+    gps_lng: Optional[float] = None,
+    gps_city: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Crée un nouveau compte avec device + GPS.
+    Si device_choice / gps_* ne sont pas fournis, tirage random USA.
+    """
+    if not is_db_enabled() or not username or not model_id:
+        return None
+
+    import random as _r
+
+    # Tirage random pour les valeurs manquantes
+    if not device_choice:
+        device_choice = _r.choice(IPHONE_DEVICE_CHOICES)
+    if gps_lat is None or gps_lng is None or not gps_city:
+        city = _r.choice(US_CITIES_GPS)
+        gps_city = city[0]
+        gps_lat = city[1]
+        gps_lng = city[2]
+
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO cf_accounts "
+                    "(username, model_id, va_discord_id, va_name, "
+                    " device_choice, gps_lat, gps_lng, gps_city) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (username, model_id) DO NOTHING "
+                    "RETURNING id, username, model_id, va_discord_id, va_name, "
+                    "device_choice, gps_lat, gps_lng, gps_city, created_at",
+                    (
+                        username.strip(),
+                        int(model_id),
+                        str(va_discord_id or ""),
+                        str(va_name or ""),
+                        device_choice,
+                        float(gps_lat),
+                        float(gps_lng),
+                        gps_city,
+                    ),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        if row:
+            return _row_to_account(row)
+        # Si conflit (compte déjà existant), on le retourne tel quel
+        return find_account(username, model_id)
+    except Exception as e:
+        logger.error(f"create_account failed: {e}")
+        return None
+
+
+def get_or_create_account(
+    username: str,
+    model_id: int,
+    va_discord_id: str = "",
+    va_name: str = "",
+) -> Optional[Dict[str, Any]]:
+    """
+    Récupère le compte s'il existe, sinon le crée avec device + GPS random.
+    Méthode pratique pour /request Discord.
+    """
+    existing = find_account(username, model_id)
+    if existing:
+        return existing
+    return create_account(
+        username=username,
+        model_id=model_id,
+        va_discord_id=va_discord_id,
+        va_name=va_name,
+    )
+
+
+def list_accounts(
+    model_id: Optional[int] = None,
+    va_discord_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Liste tous les comptes, optionnellement filtrés par modèle ou VA."""
+    if not is_db_enabled():
+        return []
+
+    where = []
+    params: List[Any] = []
+    if model_id:
+        where.append("model_id = %s")
+        params.append(int(model_id))
+    if va_discord_id:
+        where.append("va_discord_id = %s")
+        params.append(str(va_discord_id))
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, username, model_id, va_discord_id, va_name, "
+                    "device_choice, gps_lat, gps_lng, gps_city, created_at "
+                    f"FROM cf_accounts {where_sql} "
+                    "ORDER BY created_at DESC",
+                    params,
+                )
+                return [_row_to_account(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.error(f"list_accounts failed: {e}")
+        return []
+
+
+def delete_account(account_id: int) -> bool:
+    if not is_db_enabled() or not account_id:
+        return False
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM cf_accounts WHERE id = %s", (int(account_id),))
+                deleted = cur.rowcount > 0
+            conn.commit()
+        return deleted
+    except Exception as e:
+        logger.error(f"delete_account failed: {e}")
+        return False
