@@ -788,16 +788,17 @@ def mix_batch_stream(
         # Tirage aléatoire des params spoof vidéo (différent à chaque variante)
         # Si enabled_filters est None -> tous activés, sinon seulement ceux listés
         # Si compte avec device locké, on override le bitrate range pour qu'il soit
-        # cohérent avec le device (16e plus bas que 17 Pro Max)
+        # cohérent avec le device (Pro Max plus haut, etc.)
         device_custom_ranges = dict(custom_ranges or {})
-        target_fps = None
         if account and window:
             try:
                 device_specs = metadata_randomizer.get_device_specs(spoof_meta.get("model", ""))
                 # Override le range bitrate pour ce device
                 device_custom_ranges["bitrate"] = device_specs["bitrate_kbps"]
-                # Choisir un fps cohérent avec le device (30 ou 60 selon device)
-                target_fps = random.choice(device_specs["fps_choices"])
+                # Note : on ne force PAS le fps de sortie. Garder le fps source
+                # évite les artefacts de compression (force 60 fps depuis source 30 fps
+                # = 2x plus de frames mais même bitrate = qualité dégradée).
+                # Le fps de la vidéo reste celui de la source.
             except Exception:
                 pass
 
@@ -816,10 +817,6 @@ def mix_batch_stream(
             caption_style=caption_style,
             spoof_params=spoof_params,
         )
-        # Force le frame rate de sortie selon le device (cohérence iPhone)
-        # On insère -r juste avant le fichier de sortie (= dernier élément cmd)
-        if target_fps:
-            cmd = cmd[:-1] + ["-r", str(target_fps)] + [cmd[-1]]
         cmd_with_progress = cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:]
 
         item_started = time.time()
@@ -932,10 +929,17 @@ def mix_batch_stream(
                     except Exception:
                         model_label = f"ID{model_id}"
 
-                # Nom du dossier : VA + équipe + ID modèle + date + nb vidéos
-                # ex : ClipFusion_Wesley_Geelark_ID1_20260509_153022_5vids
+                # Nom du dossier :
+                # - Avec compte : @username_VA_équipe_modèle_date_Nvids
+                # - Sans compte (legacy) : ClipFusion_VA_équipe_modèle_date_Nvids
                 date_part = datetime.now().strftime('%Y%m%d_%H%M%S')
-                parts = ["ClipFusion"]
+                parts = []
+                if account and account.get("username"):
+                    # Premier élément = nom du compte Insta (sans @)
+                    parts.append(_sanitize_folder_part(account["username"]))
+                else:
+                    # Fallback legacy : préfixe "ClipFusion"
+                    parts.append("ClipFusion")
                 if va_name:
                     parts.append(_sanitize_folder_part(va_name))
                 if team:
