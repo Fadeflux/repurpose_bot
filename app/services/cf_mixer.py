@@ -49,6 +49,10 @@ SPOOF_RANGES: Dict[str, Tuple[float, float]] = {
     "rotation":   (-0.5, 0.5),
     "cut_start":  (0.1, 0.15),
     "cut_end":    (0.1, 0.15),
+    # Audio randomization — change le pitch de l'audio sans changer la durée
+    # (compensation atempo). Casse le hash audio Insta/TikTok.
+    # Plage ±1.5% : imperceptible pour l'oreille humaine.
+    "audio_pitch": (0.985, 1.015),
 }
 SPOOF_INT_KEYS = {"bitrate", "noise"}
 
@@ -150,11 +154,37 @@ def _build_video_spoof_chain(params: Dict[str, Optional[float]]) -> List[str]:
 
 
 def _build_audio_spoof_filter(params: Dict[str, Optional[float]]) -> Optional[str]:
-    """Filtre audio pour ajuster la vitesse (atempo)."""
-    speed = params.get("speed")
-    if speed is None or abs(speed - 1.0) < 0.001:
+    """
+    Filtre audio pour spoof : changement de pitch (anti-fingerprint Insta/TikTok)
+    + compensation tempo pour garder la durée correcte.
+
+    Stratégie :
+    - asetrate=44100*pitch → change la fréquence d'échantillonnage = change pitch + tempo
+    - aresample=44100 → re-sample pour rester en 44100 Hz (compatibilité)
+    - atempo=speed/pitch → compense le changement de tempo pour viser la vitesse voulue
+                           (speed = ratio de vitesse vidéo qu'on veut matcher)
+
+    Résultat : audio avec pitch décalé de ±1.5% (imperceptible humain)
+    qui casse les hash audio Insta/TikTok, tout en gardant la durée correcte.
+    """
+    speed = params.get("speed") or 1.0
+    pitch = params.get("audio_pitch") or 1.0
+
+    # Si rien à faire, pas de filtre (économie CPU)
+    if abs(speed - 1.0) < 0.001 and abs(pitch - 1.0) < 0.001:
         return None
-    return f"atempo={speed}"
+
+    # Si pas de pitch shift mais speed change → comportement legacy (juste atempo)
+    if abs(pitch - 1.0) < 0.001:
+        return f"atempo={speed}"
+
+    # Pitch shift via asetrate, puis atempo pour compenser et atteindre la vitesse cible
+    sample_rate = 44100
+    new_rate = int(sample_rate * pitch)
+    # tempo final = speed / pitch (car asetrate a déjà appliqué un facteur de pitch)
+    tempo_compensation = speed / pitch
+    # atempo n'accepte que [0.5, 2.0] par étape, mais notre range est très petit donc OK
+    return f"asetrate={new_rate},aresample={sample_rate},atempo={tempo_compensation:.6f}"
 
 
 def _escape_drawtext(text: str) -> str:
@@ -495,6 +525,15 @@ def _build_ffmpeg_cmd(
         "-b:a", "128k",
         # Strip original metadata
         "-map_metadata", "-1",
+        # bitexact : wipe complètement le tag Encoder auto-ajouté par FFmpeg
+        # (sans ça, on a "Encoder: Lavf61.x.x" qui trahit FFmpeg même si on met
+        # le metadata encoder= à vide).
+        "-fflags", "+bitexact",
+        "-flags:v", "+bitexact",
+        "-flags:a", "+bitexact",
+        # Major Brand "qt  " comme un vrai iPhone (au lieu de "MP4 Base Media v1" FFmpeg-style)
+        "-brand", "qt  ",
+        # use_metadata_tags : permet de définir des tags arbitraires (com.apple.quicktime.*)
         "-movflags", "+faststart+use_metadata_tags",
     ]
 
