@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -42,6 +44,27 @@ logger = get_logger("cf_discord_bot")
 def _get_request_channel_ids() -> List[int]:
     """Liste de canaux où /request fonctionne. Si vide, slash command dispo partout."""
     raw = os.environ.get("CF_REQUEST_CHANNEL_IDS", "")
+    out: List[int] = []
+    for piece in raw.replace(";", ",").split(","):
+        p = piece.strip()
+        if p.isdigit():
+            out.append(int(p))
+    return out
+
+
+def _get_respoof_channel_ids() -> List[int]:
+    """
+    Liste de canaux où /respoof fonctionne.
+    Si la variable d'env CF_RESPOOF_CHANNEL_IDS n'est pas définie,
+    fallback sur les IDs hardcodés (Geelark + Instagram).
+    """
+    raw = os.environ.get("CF_RESPOOF_CHANNEL_IDS", "").strip()
+    if not raw:
+        # Fallback hardcodé sur les 2 canaux respoof configurés
+        return [
+            1497103659094380625,  # Geelark
+            1497103579633418280,  # Instagram
+        ]
     out: List[int] = []
     for piece in raw.replace(";", ",").split(","):
         p = piece.strip()
@@ -523,6 +546,16 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 ephemeral=True,
             )
             return
+        # Empêcher /request dans les canaux dédiés respoof
+        respoof_channels = _get_respoof_channel_ids()
+        if respoof_channels and interaction.channel_id in respoof_channels:
+            await interaction.response.send_message(
+                f"❌ Ce canal est réservé aux **respoof** (vite fait, 1 fichier).\n"
+                f"Pour un batch complet de vidéos avec captions, utilise `/request` "
+                f"dans le canal dédié aux demandes de Drive.",
+                ephemeral=True,
+            )
+            return
 
         # 2. CONTRÔLE D'ACCÈS PAR RÔLE : le VA doit avoir le rôle ID{modele}
         if not _has_model_role(interaction.user, modele):
@@ -909,4 +942,322 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 msg += f"{i}. {p.user_name} · {p.quantite} vidéos · ID {p.model_id}\n"
         await interaction.response.send_message(msg, ephemeral=True)
 
-    logger.info("Slash commands ClipFusion installés (/request, /models, /status)")
+    @bot.tree.command(
+        name="respoof",
+        description="Respoof une photo/vidéo existante avec le device + GPS lockés d'un compte",
+    )
+    @app_commands.describe(
+        fichier="Le fichier (photo .jpg/.png/.heic OU vidéo .mp4/.mov) à respoofer",
+        compte="Username du compte Insta (sans @). Le device + GPS du compte sont appliqués.",
+        modele="ID du modèle (créatrice). Liste les modèles avec /models",
+    )
+    async def respoof_cmd(
+        interaction: "discord.Interaction",
+        fichier: discord.Attachment,
+        compte: str,
+        modele: int,
+    ):
+        from app.services import cf_respoof, cf_storage, drive_service
+
+        # 0. Filtrage canal : /respoof uniquement dans les canaux dédiés
+        respoof_channels = _get_respoof_channel_ids()
+        if respoof_channels and interaction.channel_id not in respoof_channels:
+            await interaction.response.send_message(
+                f"❌ La commande `/respoof` est dispo uniquement dans le canal dédié au spoof rapide.\n"
+                f"Pour générer un batch complet (avec captions), utilise `/request`.",
+                ephemeral=True,
+            )
+            return
+
+        # 1. Détection auto du type
+        file_type = cf_respoof.detect_file_type(fichier.filename)
+        if file_type == "unknown":
+            await interaction.response.send_message(
+                f"❌ Format non supporté pour `{fichier.filename}`.\n"
+                f"Photos : .jpg / .jpeg / .png / .heic / .heif / .webp\n"
+                f"Vidéos : .mp4 / .mov / .m4v / .avi / .webm / .mkv",
+                ephemeral=True,
+            )
+            return
+
+        # 2. Validation modèle
+        model = cf_storage.get_model(modele)
+        if not model:
+            await interaction.response.send_message(
+                f"❌ Modèle ID **{modele}** introuvable.",
+                ephemeral=True,
+            )
+            return
+
+        # 3. Validation compte (anti-vol, création auto si nouveau)
+        clean_username = compte.strip().lstrip("@").strip()
+        if not clean_username:
+            await interaction.response.send_message(
+                "❌ Le nom du compte est invalide.",
+                ephemeral=True,
+            )
+            return
+
+        is_admin_user = _is_admin(interaction.user)
+        existing = cf_storage.find_account(clean_username, modele)
+        user_id_str = str(interaction.user.id)
+        is_new_account = False
+
+        if existing:
+            owner_id = str(existing.get("va_discord_id", "") or "")
+            if owner_id and owner_id != user_id_str and not is_admin_user:
+                owner_name = existing.get("va_name", "un autre VA")
+                await interaction.response.send_message(
+                    f"❌ Le compte **@{clean_username}** appartient déjà à **{owner_name}**.",
+                    ephemeral=True,
+                )
+                return
+            account_data = existing
+        else:
+            is_new_account = True
+            account_data = cf_storage.create_account(
+                username=clean_username,
+                model_id=modele,
+                va_discord_id=user_id_str,
+                va_name=interaction.user.display_name or interaction.user.name,
+            )
+            if not account_data:
+                await interaction.response.send_message(
+                    f"❌ Impossible de créer le compte @{clean_username}.",
+                    ephemeral=True,
+                )
+                return
+
+        # 4. Rate limit (compte 1 vidéo dans le quota)
+        if not is_admin_user:
+            max_v, period_days = _rate_limit_config()
+            if max_v > 0:
+                used = cf_storage.count_va_videos_recent(
+                    interaction.user.display_name or interaction.user.name,
+                    days=period_days,
+                )
+                if used + 1 > max_v:
+                    await interaction.response.send_message(
+                        f"⛔ Quota dépassé : {used}/{max_v} vidéos sur {period_days}j.",
+                        ephemeral=True,
+                    )
+                    return
+
+        # 5. Intervalle min entre batchs sur le même compte (6h par défaut)
+        if not is_admin_user and not is_new_account:
+            try:
+                min_interval_h = int(os.environ.get("CF_MIN_INTERVAL_HOURS_PER_ACCOUNT", "6"))
+            except Exception:
+                min_interval_h = 6
+            if min_interval_h > 0:
+                last_batch_time = cf_storage.get_last_batch_time_for_account(account_data["username"])
+                if last_batch_time:
+                    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+                    now_utc = _dt.now(_tz.utc)
+                    if last_batch_time.tzinfo is None:
+                        last_batch_time = last_batch_time.replace(tzinfo=_tz.utc)
+                    elapsed = now_utc - last_batch_time
+                    if elapsed < _td(hours=min_interval_h):
+                        wait = _td(hours=min_interval_h) - elapsed
+                        h = int(wait.total_seconds() // 3600)
+                        m = int((wait.total_seconds() % 3600) // 60)
+                        wait_str = f"{h}h{m:02d}" if h > 0 else f"{m} min"
+                        await interaction.response.send_message(
+                            f"⏰ Intervalle min non respecté pour @{account_data['username']}.\n"
+                            f"Reviens dans **{wait_str}**.",
+                            ephemeral=True,
+                        )
+                        return
+
+        # 6. Defer (le download + spoof + upload prend quelques secondes)
+        await interaction.response.defer(ephemeral=False, thinking=True)
+
+        # 7. Download du fichier depuis Discord
+        try:
+            file_bytes = await fichier.read()
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Impossible de lire le fichier : {e}",
+                ephemeral=True,
+            )
+            return
+
+        # 8. Sauvegarde temporaire en local
+        import tempfile, uuid
+        tmpdir = Path(tempfile.gettempdir()) / "cf_respoof"
+        tmpdir.mkdir(parents=True, exist_ok=True)
+        in_ext = Path(fichier.filename).suffix.lower() or ".bin"
+        tmp_in = tmpdir / f"respoof_in_{uuid.uuid4().hex}{in_ext}"
+        tmp_in.write_bytes(file_bytes)
+
+        # 9. Détermine team / tz / target_hour
+        team = _detect_team_from_guild(interaction.guild_id if interaction.guild else None)
+        tz_name = os.environ.get(f"CF_TZ_{team.upper()}", "benin").lower().strip()
+        if tz_name not in ("benin", "madagascar"):
+            tz_name = "benin"
+        # Fenêtre horaire random parmi les 3 (matin/soir/nuit)
+        target_hour = random.choice([9, 17, 23])
+
+        # 10. Respoof
+        try:
+            if file_type == "photo":
+                # Photo : retourne bytes
+                spoofed_bytes, info = cf_respoof.respoof_photo(
+                    input_bytes=file_bytes,
+                    filename=fichier.filename,
+                    account=account_data,
+                    target_hour=target_hour,
+                    tz_name=tz_name,
+                )
+                # Sauvegarde local
+                out_name = f"respoof_{clean_username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                tmp_out = tmpdir / out_name
+                tmp_out.write_bytes(spoofed_bytes)
+            else:
+                # Vidéo : transcode in-place
+                out_name = f"respoof_{clean_username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+                tmp_out = tmpdir / out_name
+                info = cf_respoof.respoof_video(
+                    input_path=str(tmp_in),
+                    output_path=str(tmp_out),
+                    account=account_data,
+                    target_hour=target_hour,
+                    tz_name=tz_name,
+                )
+        except Exception as e:
+            logger.error(f"Respoof failed: {e}", exc_info=True)
+            await interaction.followup.send(
+                f"❌ Erreur pendant le respoof : `{e}`",
+                ephemeral=True,
+            )
+            return
+        finally:
+            try:
+                tmp_in.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        # 11. Upload sur Drive (dans un dossier au nom du compte)
+        folder_id = ""
+        folder_url = ""
+        va_email = ""
+        try:
+            folder_name = (
+                f"{clean_username}_respoof_"
+                f"{(interaction.user.display_name or interaction.user.name)}_"
+                f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            )
+            folder_id = drive_service.create_batch_folder(folder_name) or ""
+            folder_url = drive_service.get_folder_link(folder_id) if folder_id else ""
+
+            # Mime type selon le type de fichier
+            mime = "image/jpeg" if file_type == "photo" else "video/mp4"
+            up = drive_service.upload_file(
+                local_path=tmp_out,
+                folder_id=folder_id,
+                mime_type=mime,
+            )
+
+            # Partage avec le VA si email connu
+            try:
+                from app.services import va_emails_db
+                all_emails = va_emails_db.load_all_emails() or {}
+                va_email = all_emails.get(user_id_str, "") or ""
+            except Exception:
+                pass
+            if va_email and folder_id:
+                try:
+                    drive_service.share_folder_with_users(folder_id, [va_email])
+                except Exception as e:
+                    logger.warning(f"Drive share failed: {e}")
+        except Exception as e:
+            logger.error(f"Drive upload failed: {e}", exc_info=True)
+            await interaction.followup.send(
+                f"❌ Erreur Drive : `{e}`",
+                ephemeral=True,
+            )
+            return
+        finally:
+            try:
+                tmp_out.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        # 12. Save en historique (compte pour rate limit)
+        try:
+            cf_storage.add_batch(
+                va_name=interaction.user.display_name or interaction.user.name,
+                team=team,
+                device_choice=account_data.get("device_choice", ""),
+                videos_count=1,
+                videos_uploaded=1,
+                drive_folder_id=folder_id,
+                drive_folder_url=folder_url,
+                drive_folder_name=folder_name,
+                va_email=va_email,
+                discord_notified=True,
+                duration_seconds=0,
+                model_id=modele,
+                model_label=model.get("label", ""),
+                account_username=clean_username,
+            )
+        except Exception as e:
+            logger.warning(f"add_batch (respoof) failed: {e}")
+
+        # 13. Réponse au VA (canal + DM)
+        type_emoji = "📷" if file_type == "photo" else "🎥"
+        type_label = "Photo" if file_type == "photo" else "Vidéo"
+        ack = (
+            f"{type_emoji} **Respoof terminé !**\n"
+            f"📁 Type : {type_label}\n"
+            f"🔒 Compte : @**{clean_username}** "
+            f"({info.get('device_model', '?')} · {info.get('gps_city', '?')})\n"
+            f"📱 iOS : `{info.get('software', '?')}`\n"
+            f"🕐 Fenêtre : {target_hour}h (TZ {tz_name})\n"
+        )
+        if folder_url:
+            ack += f"\n🔗 [Lien Drive]({folder_url})"
+
+        await interaction.followup.send(ack, ephemeral=False)
+
+        # DM au VA
+        try:
+            dm = await interaction.user.create_dm()
+            await dm.send(ack)
+        except Exception as e:
+            logger.warning(f"DM respoof failed: {e}")
+
+    # Autocomplete pour le param `compte` (filtre par VA + modèle)
+    @respoof_cmd.autocomplete("compte")
+    async def respoof_compte_autocomplete(
+        interaction: "discord.Interaction",
+        current: str,
+    ) -> List[app_commands.Choice[str]]:
+        try:
+            user_id_str = str(interaction.user.id)
+            modele_value = None
+            for opt in (interaction.data.get("options") or []):
+                if opt.get("name") == "modele":
+                    modele_value = opt.get("value")
+                    break
+            accounts = cf_storage.list_accounts(va_discord_id=user_id_str)
+            if modele_value:
+                try:
+                    mid = int(modele_value)
+                    accounts = [a for a in accounts if int(a.get("model_id", 0)) == mid]
+                except (ValueError, TypeError):
+                    pass
+            cur_lower = (current or "").strip().lower().lstrip("@")
+            filtered = [a for a in accounts if cur_lower in a.get("username", "").lower()]
+            return [
+                app_commands.Choice(
+                    name=f"@{a['username']} ({a['device_choice'].replace('_', ' ')[:18]})",
+                    value=a["username"],
+                )
+                for a in filtered[:25]
+            ]
+        except Exception as e:
+            logger.warning(f"respoof autocomplete failed: {e}")
+            return []
+
+    logger.info("Slash commands ClipFusion installés (/request, /respoof, /models, /status)")
