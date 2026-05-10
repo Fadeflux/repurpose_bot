@@ -1,12 +1,18 @@
 """OCR service - extract caption text from Instagram/TikTok screenshots.
 
-Strategy:
-1. Try OCR.space API (env var OCR_SPACE_API_KEY) — much better on stylized overlay text
-2. Fall back to local Tesseract if no API key OR if API call fails
+Stratégie de fallback en cascade :
+1. Google Vision API (env var GOOGLE_VISION_CREDENTIALS_JSON) — la meilleure qualité
+   sur captions stylisées (gros texte blanc avec contour)
+2. OCR.space API (env var OCR_SPACE_API_KEY) — fallback API gratuit
+3. Tesseract local — fallback ultime, qualité plus basse mais 0 dépendance
+
+Si une priorité plus haute est configurée mais échoue (timeout, quota, etc.),
+on fallback automatiquement sur la suivante.
 """
 import os
 import base64
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -16,28 +22,105 @@ try:
 except ImportError:
     pass
 
+logger = logging.getLogger(__name__)
+
 
 def extract_text_from_image(image_path: str) -> str:
-    """Extract text from screenshot. Returns empty string if everything fails."""
-    api_key = os.environ.get("OCR_SPACE_API_KEY", "").strip()
+    """
+    Extrait le texte d'un screenshot. Retourne une chaîne vide si tout échoue.
 
-    # 1) Try OCR.space if key is set
-    if api_key:
+    Cascade :
+    - 1. Google Vision (si GOOGLE_VISION_CREDENTIALS_JSON configuré)
+    - 2. OCR.space (si OCR_SPACE_API_KEY configuré)
+    - 3. Tesseract local (fallback ultime)
+    """
+    google_creds = os.environ.get("GOOGLE_VISION_CREDENTIALS_JSON", "").strip()
+    ocr_space_key = os.environ.get("OCR_SPACE_API_KEY", "").strip()
+
+    # 1) Google Vision (meilleure qualité)
+    if google_creds:
         try:
-            text = _ocr_space(image_path, api_key)
+            text = _google_vision(image_path, google_creds)
             if text:
+                logger.info(f"[OCR] Google Vision extracted {len(text)} chars")
                 return _clean_caption(text)
         except Exception as e:
-            print(f"[OCR.space] failed, falling back to Tesseract: {e}")
+            logger.warning(f"[OCR] Google Vision failed, falling back: {e}")
 
-    # 2) Fallback: Tesseract (local)
+    # 2) OCR.space (fallback API)
+    if ocr_space_key:
+        try:
+            text = _ocr_space(image_path, ocr_space_key)
+            if text:
+                logger.info(f"[OCR] OCR.space extracted {len(text)} chars")
+                return _clean_caption(text)
+        except Exception as e:
+            logger.warning(f"[OCR] OCR.space failed, falling back to Tesseract: {e}")
+
+    # 3) Tesseract (local, fallback ultime)
     try:
-        return _tesseract(image_path)
+        text = _tesseract(image_path)
+        if text:
+            logger.info(f"[OCR] Tesseract extracted {len(text)} chars")
+        return text
     except Exception as e:
-        print(f"[Tesseract] failed: {e}")
+        logger.error(f"[OCR] Tesseract failed: {e}")
         return ""
 
 
+# ---------------------------------------------------------------------------
+# Google Vision API
+# ---------------------------------------------------------------------------
+def _google_vision(image_path: str, credentials_json: str) -> str:
+    """
+    Appel à Google Cloud Vision API via la lib google-cloud-vision.
+    Utilise document_text_detection qui est optimisé pour les overlays/captions
+    (vs text_detection qui est plus pour les vidéos OCR brut).
+    """
+    try:
+        from google.cloud import vision
+        from google.oauth2 import service_account
+    except ImportError as e:
+        raise RuntimeError(
+            "google-cloud-vision non installé. Ajoute 'google-cloud-vision' "
+            "dans requirements.txt et redéploie."
+        ) from e
+
+    # Parse le JSON de credentials (passé via variable d'env)
+    try:
+        creds_dict = json.loads(credentials_json)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"GOOGLE_VISION_CREDENTIALS_JSON invalide (pas du JSON): {e}")
+
+    creds = service_account.Credentials.from_service_account_info(creds_dict)
+    client = vision.ImageAnnotatorClient(credentials=creds)
+
+    # Lit l'image en bytes
+    with open(image_path, "rb") as f:
+        content = f.read()
+    image = vision.Image(content=content)
+
+    # document_text_detection est plus performant pour les overlays/textes denses
+    # que text_detection (utilisé pour les photos de panneaux/etc.)
+    response = client.document_text_detection(image=image)
+
+    if response.error.message:
+        raise RuntimeError(f"Google Vision API error: {response.error.message}")
+
+    # full_text_annotation contient le texte complet structuré
+    if response.full_text_annotation and response.full_text_annotation.text:
+        return response.full_text_annotation.text
+
+    # Fallback : essaie text_annotations[0] si full_text vide
+    if response.text_annotations:
+        return response.text_annotations[0].description
+
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# OCR.space API
+# ---------------------------------------------------------------------------
 def _ocr_space(image_path: str, api_key: str) -> str:
     """Call OCR.space API. Returns extracted text."""
     # Use multipart/form-data via urllib to avoid extra deps
@@ -65,7 +148,7 @@ def _ocr_space(image_path: str, api_key: str) -> str:
 
     # Fields
     add_field("apikey", api_key)
-    add_field("language", "fre")          # French; OCR.space auto-detects too
+    add_field("language", "eng")          # English for Insta captions
     add_field("isOverlayRequired", "false")
     add_field("scale", "true")
     add_field("OCREngine", "2")           # Engine 2 is much better on overlay text
@@ -104,6 +187,9 @@ def _ocr_space(image_path: str, api_key: str) -> str:
     return parsed[0].get("ParsedText", "") or ""
 
 
+# ---------------------------------------------------------------------------
+# Tesseract local (fallback ultime)
+# ---------------------------------------------------------------------------
 def _tesseract(image_path: str) -> str:
     """Local Tesseract fallback."""
     try:
@@ -114,12 +200,15 @@ def _tesseract(image_path: str) -> str:
 
     img = Image.open(image_path)
     try:
-        text = pytesseract.image_to_string(img, lang="fra+eng")
+        text = pytesseract.image_to_string(img, lang="eng")
     except Exception:
         text = pytesseract.image_to_string(img)
     return _clean_caption(text)
 
 
+# ---------------------------------------------------------------------------
+# Cleaning
+# ---------------------------------------------------------------------------
 def _clean_caption(raw: str) -> str:
     """Clean up OCR output to keep only the meaningful caption."""
     if not raw:
