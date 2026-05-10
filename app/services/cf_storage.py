@@ -171,6 +171,14 @@ def init_schema() -> bool:
                     ADD COLUMN IF NOT EXISTS account_username TEXT DEFAULT ''
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_cf_batches_account ON cf_batches(account_username)")
+                # Migration : ajout colonnes ios_version + ios_set_at sur cf_accounts
+                # Permet le drift iOS réaliste : un compte garde son iOS pendant
+                # ~30-60j puis a une chance croissante de "mettre à jour" comme un vrai humain
+                cur.execute("""
+                    ALTER TABLE cf_accounts
+                    ADD COLUMN IF NOT EXISTS ios_version TEXT DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS ios_set_at TIMESTAMPTZ DEFAULT NULL
+                """)
             conn.commit()
         logger.info("ClipFusion DB schema initialisé")
         return True
@@ -1028,7 +1036,12 @@ IPHONE_DEVICE_CHOICES = [
 
 
 def _row_to_account(row) -> Dict[str, Any]:
-    return {
+    """
+    Convertit une row DB en dict.
+    Les colonnes ios_version + ios_set_at sont en position 10/11 si présentes
+    (sinon vides — compatibilité avec les SELECT qui ne les fetchent pas).
+    """
+    base = {
         "id": int(row[0]),
         "username": row[1],
         "model_id": int(row[2]),
@@ -1039,7 +1052,15 @@ def _row_to_account(row) -> Dict[str, Any]:
         "gps_lng": float(row[7]),
         "gps_city": row[8],
         "created_at": row[9].isoformat() if row[9] else None,
+        "ios_version": "",
+        "ios_set_at": None,
     }
+    # Les colonnes 10 et 11 sont optionnelles (ajoutées par migration)
+    if len(row) > 10:
+        base["ios_version"] = row[10] or ""
+    if len(row) > 11:
+        base["ios_set_at"] = row[11].isoformat() if row[11] else None
+    return base
 
 
 def get_city_altitude(city_name: str) -> int:
@@ -1066,7 +1087,7 @@ def find_account(username: str, model_id: int) -> Optional[Dict[str, Any]]:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT id, username, model_id, va_discord_id, va_name, "
-                    "device_choice, gps_lat, gps_lng, gps_city, created_at "
+                    "device_choice, gps_lat, gps_lng, gps_city, created_at, ios_version, ios_set_at "
                     "FROM cf_accounts WHERE username = %s AND model_id = %s",
                     (username.strip(), int(model_id)),
                 )
@@ -1116,7 +1137,7 @@ def create_account(
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
                     "ON CONFLICT (username, model_id) DO NOTHING "
                     "RETURNING id, username, model_id, va_discord_id, va_name, "
-                    "device_choice, gps_lat, gps_lng, gps_city, created_at",
+                    "device_choice, gps_lat, gps_lng, gps_city, created_at, ios_version, ios_set_at",
                     (
                         username.strip(),
                         int(model_id),
@@ -1183,7 +1204,7 @@ def list_accounts(
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT id, username, model_id, va_discord_id, va_name, "
-                    "device_choice, gps_lat, gps_lng, gps_city, created_at "
+                    "device_choice, gps_lat, gps_lng, gps_city, created_at, ios_version, ios_set_at "
                     f"FROM cf_accounts {where_sql} "
                     "ORDER BY created_at DESC",
                     params,
@@ -1206,4 +1227,28 @@ def delete_account(account_id: int) -> bool:
         return deleted
     except Exception as e:
         logger.error(f"delete_account failed: {e}")
+        return False
+
+
+def update_account_ios(account_id: int, ios_version: str) -> bool:
+    """
+    Met à jour la version iOS d'un compte et le timestamp de cette mise à jour.
+    Utilisé par la logique de drift iOS (un compte change d'iOS de temps en temps
+    comme un vrai humain qui met à jour son téléphone).
+    """
+    if not is_db_enabled() or not account_id or not ios_version:
+        return False
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE cf_accounts SET ios_version = %s, ios_set_at = NOW() "
+                    "WHERE id = %s",
+                    (ios_version, int(account_id)),
+                )
+                updated = cur.rowcount > 0
+            conn.commit()
+        return updated
+    except Exception as e:
+        logger.error(f"update_account_ios failed: {e}")
         return False
