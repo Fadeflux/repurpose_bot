@@ -12,7 +12,7 @@ Chaque appel produit une signature COMPLÈTEMENT UNIQUE :
 import random
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict
 
 
 # ---------------------------------------------------------------------------
@@ -25,40 +25,12 @@ IPHONE_MODELS = [
     ("iPhone 17 Air",     ["26.0", "26.0.1", "26.1", "26.1.1", "26.2", "26.3", "26.3.1", "26.4", "26.4.1"]),
     ("iPhone 17",         ["26.0", "26.0.1", "26.1", "26.1.1", "26.2", "26.3", "26.3.1", "26.4", "26.4.1"]),
     # iPhone 16 family (sortie septembre 2024, iOS 18 et 26)
-    # NOTE : iPhone 16e retiré (capable que de 30 fps, on force 60 fps partout)
     ("iPhone 16 Pro Max", ["18.0", "18.0.1", "18.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
     ("iPhone 16 Pro",     ["18.0", "18.0.1", "18.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
     ("iPhone 16 Plus",    ["18.0", "18.0.1", "18.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
     ("iPhone 16",         ["18.0", "18.0.1", "18.1", "18.2", "18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
+    ("iPhone 16e",        ["18.3", "18.4", "26.0", "26.1", "26.2", "26.3", "26.4", "26.4.1"]),
 ]
-
-
-# ---------------------------------------------------------------------------
-# Specs vidéo cohérentes par device iPhone
-# Frame rate : TOUS forcés à 60 fps (les Reels qui marchent sont en 60 fps,
-#              et tous nos iPhones supportent le 60 fps).
-# Bitrate (kbps) : range plausible selon le device. Pro/Pro Max plus haut.
-# ---------------------------------------------------------------------------
-IPHONE_DEVICE_SPECS: Dict[str, Dict[str, Any]] = {
-    # Modèles haut de gamme : 60 fps, bitrate haut
-    "iPhone 17 Pro Max":  {"fps_choices": [60], "bitrate_kbps": (12000, 18000)},
-    "iPhone 17 Pro":      {"fps_choices": [60], "bitrate_kbps": (12000, 18000)},
-    "iPhone 16 Pro Max":  {"fps_choices": [60], "bitrate_kbps": (12000, 18000)},
-    "iPhone 16 Pro":      {"fps_choices": [60], "bitrate_kbps": (12000, 18000)},
-    # Modèles standard : 60 fps, bitrate moyen-haut
-    "iPhone 17 Air":      {"fps_choices": [60], "bitrate_kbps": (10000, 15000)},
-    "iPhone 17":          {"fps_choices": [60], "bitrate_kbps": (10000, 15000)},
-    "iPhone 16 Plus":     {"fps_choices": [60], "bitrate_kbps": (10000, 14000)},
-    "iPhone 16":          {"fps_choices": [60], "bitrate_kbps": (10000, 14000)},
-}
-
-
-def get_device_specs(model: str) -> Dict[str, Any]:
-    """
-    Retourne les specs vidéo cohérentes pour un modèle iPhone.
-    Si modèle inconnu, fallback générique 60 fps.
-    """
-    return IPHONE_DEVICE_SPECS.get(model, {"fps_choices": [60], "bitrate_kbps": (10000, 14000)})
 
 
 # ---------------------------------------------------------------------------
@@ -209,9 +181,59 @@ def _random_timings(base_date: datetime) -> Dict[str, str]:
 # Générateur iPhone
 # ---------------------------------------------------------------------------
 def _iphone_metadata() -> Dict[str, str]:
-    """Métadonnées complètes pour simuler un iPhone 16/17 (random model)."""
+    """Métadonnées complètes pour simuler un iPhone 16/17."""
     model, ios_versions = random.choice(IPHONE_MODELS)
-    return _iphone_metadata_impl(model, ios_versions)
+    ios_version = random.choice(ios_versions)
+
+    base_lat, base_lng = random.choice(CITY_COORDS)
+    lat = base_lat + random.uniform(-0.05, 0.05)
+    lng = base_lng + random.uniform(-0.05, 0.05)
+    alt = random.uniform(0, 200)
+    location_str = _format_iso6709(lat, lng, alt)
+
+    base_date = _random_datetime()
+    timings = _random_timings(base_date)
+
+    content_uuid = _apple_uuid()
+    lavf = random.choice(LAVF_VERSIONS)
+    lavc = random.choice(LAVC_VERSIONS)
+
+    return {
+        # Stripping
+        "comment": "", "description": "", "title": "", "artist": "", "album": "",
+
+        # Identité Apple
+        "make": "Apple",
+        "model": model,
+        "com.apple.quicktime.make": "Apple",
+        "com.apple.quicktime.model": model,
+        "com.apple.quicktime.software": ios_version,
+
+        # Géoloc
+        "location": location_str,
+        "location-eng": location_str,
+        "com.apple.quicktime.location.ISO6709": location_str,
+        "com.apple.quicktime.location.accuracy.horizontal": f"{random.uniform(4.5, 15.0):.6f}",
+
+        # Dates
+        "creation_time": timings["format_time"],
+        "date": timings["format_time"][:10],
+        "com.apple.quicktime.creationdate": timings["apple_creationdate"],
+
+        # UUID
+        "com.apple.quicktime.content.identifier": content_uuid,
+
+        # Encoder
+        "encoder": f"Lavf{lavf}",
+
+        # Clés privées
+        "_platform": "iphone",
+        "_video_creation_time": timings["v_stream_time"],
+        "_audio_creation_time": timings["a_stream_time"],
+        "_stream_encoder_lavc": f"Lavc{lavc} libx264",
+        "_video_handler_name": "Core Media Video",
+        "_audio_handler_name": "Core Media Audio",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -259,13 +281,13 @@ def _android_metadata() -> Dict[str, str]:
         "date": timings["format_time"][:10],
 
         # Encoder
-        "encoder": "",
+        "encoder": f"Lavf{lavf}",
 
         # Clés privées
         "_platform": "android",
         "_video_creation_time": timings["v_stream_time"],
         "_audio_creation_time": timings["a_stream_time"],
-        "_stream_encoder_lavc": "H.264",
+        "_stream_encoder_lavc": f"Lavc{lavc} libx264",
         "_video_handler_name": "VideoHandle",
         "_audio_handler_name": "SoundHandle",
     }
@@ -307,7 +329,7 @@ _IPHONE_MAP = {
     "iphone_16_pro":     "iPhone 16 Pro",
     "iphone_16_plus":    "iPhone 16 Plus",
     "iphone_16":         "iPhone 16",
-    # iPhone 16e retiré : ne supportait que le 30 fps, on force 60 fps partout
+    "iphone_16e":        "iPhone 16e",
 }
 
 _ANDROID_MAP = {
@@ -347,52 +369,6 @@ def _android_metadata_fixed(model_code: str) -> Dict[str, str]:
     return _android_metadata()  # fallback
 
 
-def _apple_extra_fields() -> Dict[str, str]:
-    """
-    Champs metadata supplémentaires que les vraies vidéos iPhone embarquent.
-    Tous ces champs sont DOCUMENTÉS dans des vidéos iPhone réelles, pas inventés.
-
-    Source : tags QuickTime extraits via exiftool depuis vidéos iPhone iOS 17/18/26.
-    """
-    # Mode capture : Video dans 95% des cas, sinon TimeLapse ou SlowMo
-    capture_mode_roll = random.random()
-    if capture_mode_roll < 0.93:
-        capture_mode = "Video"
-    elif capture_mode_roll < 0.97:
-        capture_mode = "TimeLapse"
-    else:
-        capture_mode = "SlowMo"
-
-    # Live photo auto : 0 = pas une live photo (cas le plus courant pour Reels/TikTok)
-    live_photo_auto = "0"
-
-    # Full frame rate playback intent : 0 ou 1 random
-    # 1 = la vidéo doit jouer à fps native (slow-mo notamment)
-    full_fps_intent = "1" if capture_mode == "SlowMo" else str(random.randint(0, 1))
-
-    # Vidéo orientation : 1 = portrait (TikTok/Reels = vertical)
-    video_orientation = "1"
-
-    # Is montage : 0 = pas un montage (capture brute)
-    is_montage = "0"
-
-    # Detected face count : random 0 ou 1 (faces peuvent être 0 si filme objet/scène)
-    detected_faces = str(random.choice([0, 0, 0, 1, 1]))  # 60% des vidéos sans face détectée
-
-    # Camera frame readout time (microsecondes) : valeur typique iPhone
-    camera_readout = str(random.choice([15633, 16667, 16670, 18001, 22202]))
-
-    return {
-        "com.apple.photos.captureMode": capture_mode,
-        "com.apple.quicktime.live-photo.auto": live_photo_auto,
-        "com.apple.quicktime.full-frame-rate-playback-intent": full_fps_intent,
-        "com.apple.quicktime.video-orientation": video_orientation,
-        "com.apple.quicktime.is-montage": is_montage,
-        "com.apple.quicktime.detected-face.face-count": detected_faces,
-        "com.apple.quicktime.camera.framereadouttimeinmicroseconds": camera_readout,
-    }
-
-
 def _iphone_metadata_impl(model: str, ios_versions: list) -> Dict[str, str]:
     """Version factorisée du generator iPhone."""
     ios_version = random.choice(ios_versions)
@@ -406,7 +382,7 @@ def _iphone_metadata_impl(model: str, ios_versions: list) -> Dict[str, str]:
     content_uuid = _apple_uuid()
     lavf = random.choice(LAVF_VERSIONS)
     lavc = random.choice(LAVC_VERSIONS)
-    base = {
+    return {
         "comment": "", "description": "", "title": "", "artist": "", "album": "",
         "make": "Apple",
         "model": model,
@@ -421,17 +397,14 @@ def _iphone_metadata_impl(model: str, ios_versions: list) -> Dict[str, str]:
         "date": timings["format_time"][:10],
         "com.apple.quicktime.creationdate": timings["apple_creationdate"],
         "com.apple.quicktime.content.identifier": content_uuid,
-        "encoder": "",
+        "encoder": f"Lavf{lavf}",
         "_platform": "iphone",
         "_video_creation_time": timings["v_stream_time"],
         "_audio_creation_time": timings["a_stream_time"],
-        "_stream_encoder_lavc": "H.264",
+        "_stream_encoder_lavc": f"Lavc{lavc} libx264",
         "_video_handler_name": "Core Media Video",
         "_audio_handler_name": "Core Media Audio",
     }
-    # Ajout des champs Apple supplémentaires (capture mode, faces, etc.)
-    base.update(_apple_extra_fields())
-    return base
 
 
 def _android_metadata_impl(make: str, model_code: str, _name: str, android_versions: list) -> Dict[str, str]:
@@ -458,11 +431,11 @@ def _android_metadata_impl(make: str, model_code: str, _name: str, android_versi
         "location-eng": location_str,
         "creation_time": timings["format_time"],
         "date": timings["format_time"][:10],
-        "encoder": "",
+        "encoder": f"Lavf{lavf}",
         "_platform": "android",
         "_video_creation_time": timings["v_stream_time"],
         "_audio_creation_time": timings["a_stream_time"],
-        "_stream_encoder_lavc": "H.264",
+        "_stream_encoder_lavc": f"Lavc{lavc} libx264",
         "_video_handler_name": "VideoHandle",
         "_audio_handler_name": "SoundHandle",
     }
@@ -525,15 +498,11 @@ def metadata_to_ffmpeg_args(metadata: Dict[str, str]) -> list:
     """
     Convertit un dict de metadata en args CLI ffmpeg.
     Les clés privées (préfixe `_`) sont gérées séparément.
-    Les valeurs vides ("") wipe le champ correspondant dans le mp4 final
-    (utile pour effacer les tags FFmpeg comme `encoder` qui trahissent l'origine).
     """
     args = []
     for key, value in metadata.items():
         if key.startswith("_"):
             continue
-        # Toujours injecter, même les valeurs vides : ffmpeg les utilisera
-        # pour wipe les champs (= les rendre vides dans le mp4 de sortie).
         args += ["-metadata", f"{key}={value}"]
 
     # Stream vidéo
@@ -544,9 +513,7 @@ def metadata_to_ffmpeg_args(metadata: Dict[str, str]) -> list:
         args += ["-metadata:s:v:0", f"creation_time={v_time}"]
     if v_handler:
         args += ["-metadata:s:v:0", f"handler_name={v_handler}"]
-    # v_encoder peut être "H.264" ou autre str non-vide. On l'injecte toujours
-    # si fourni, même si c'est juste "H.264" (= remplace Lavc{x} libx264).
-    if v_encoder is not None:
+    if v_encoder:
         args += ["-metadata:s:v:0", f"encoder={v_encoder}"]
 
     # Stream audio
@@ -558,171 +525,3 @@ def metadata_to_ffmpeg_args(metadata: Dict[str, str]) -> list:
         args += ["-metadata:s:a:0", f"handler_name={a_handler}"]
 
     return args
-
-
-# ============================================================================
-# COMPTES VERROUILLÉS — Génère metadata avec device + GPS fixes + heure cible
-# ============================================================================
-# Timezones supportées pour la creation_time des fenêtres de post.
-# Le creation_time est généré dans la fenêtre [target_hour - 1h, target_hour]
-# heure locale du VA, puis converti en UTC pour le mp4.
-#
-# Bénin : Africa/Porto-Novo (GMT+1, pas de DST)
-# Madagascar : Indian/Antananarivo (GMT+3, pas de DST)
-TIMEZONE_OFFSETS = {
-    "benin": 1,        # GMT+1
-    "madagascar": 3,   # GMT+3
-}
-
-
-def _datetime_for_window(target_hour: int, tz_offset_hours: int) -> datetime:
-    """
-    Génère une datetime UTC qui correspond à 'target_hour' heure locale du VA,
-    avec une variation aléatoire entre [target_hour - 60min, target_hour].
-
-    Exemple : target_hour=9 (matin Bénin GMT+1), résultat = entre 8h00 et 9h00
-    heure locale, puis converti en UTC (donc entre 7h00 et 8h00 UTC).
-
-    La date (jour/mois/année) est aléatoire dans les 365 derniers jours.
-    """
-    # Tirage du jour : entre 3 et 365 jours en arrière
-    days_ago = random.randint(3, 365)
-    base_date_local = datetime.utcnow() - timedelta(days=days_ago)
-
-    # Heure : random entre target_hour - 1h et target_hour, à la minute près
-    minute = random.randint(0, 59)
-    second = random.randint(0, 59)
-    # On démarre à target_hour - 1 (ex: 8h pour matin 9h)
-    local_dt = base_date_local.replace(
-        hour=max(0, target_hour - 1),
-        minute=minute,
-        second=second,
-        microsecond=0,
-    )
-
-    # Conversion local → UTC
-    utc_dt = local_dt - timedelta(hours=tz_offset_hours)
-    return utc_dt
-
-
-def _iso6709_for_account(
-    lat: float,
-    lng: float,
-    alt: Optional[float] = None,
-    drift_step: int = 0,
-) -> str:
-    """
-    ISO 6709 avec une variation autour du GPS lock.
-
-    drift_step : si >0, simule une dérive progressive (la personne marche/bouge).
-                 Step 0 = position de base. Step 5 = a marché ~50m. Step 10 = ~100m.
-                 Sinon, jitter pur random ±0.02° (~2km, dans le quartier).
-
-    alt : altitude en mètres. Si None, random 0-200m. Si fournie, ±5m.
-    """
-    if drift_step > 0:
-        # Dérive cumulative : delta croissant avec le step, dans une direction random
-        # 1 step ≈ 10m de déplacement (0.0001° ≈ 11m)
-        # Direction random mais cohérente (la personne ne va pas dans tous les sens)
-        # On utilise un seed basé sur (lat, lng) pour que la direction soit stable
-        # tant qu'on a la même lat/lng de base
-        rng = random.Random(int((lat * 1000 + lng * 1000)) ^ 0xDEADBEEF)
-        direction_deg = rng.uniform(0, 360)
-        import math
-        # ~10m par step, plafonné pour pas dériver trop loin (max ~150m)
-        distance_deg = min(0.0015, drift_step * 0.0001)
-        delta_lat = distance_deg * math.cos(math.radians(direction_deg))
-        delta_lng = distance_deg * math.sin(math.radians(direction_deg))
-        # Petit bruit additionnel pour pas que ce soit trop linéaire
-        jitter_lat = lat + delta_lat + random.uniform(-0.0002, 0.0002)
-        jitter_lng = lng + delta_lng + random.uniform(-0.0002, 0.0002)
-    else:
-        # Jitter random classique (±0.02°, ~2km)
-        jitter_lat = lat + random.uniform(-0.02, 0.02)
-        jitter_lng = lng + random.uniform(-0.02, 0.02)
-
-    # Altitude : si fournie, on s'en sert avec petit bruit (±5m). Sinon random.
-    if alt is not None:
-        final_alt = alt + random.uniform(-5, 5)
-    else:
-        final_alt = random.uniform(0, 200)
-
-    return _format_iso6709(jitter_lat, jitter_lng, final_alt)
-
-
-def iphone_metadata_for_account(
-    device_choice: str,
-    gps_lat: float,
-    gps_lng: float,
-    target_hour: int,
-    tz_name: str = "benin",
-    gps_alt: Optional[float] = None,
-    drift_step: int = 0,
-) -> Dict[str, str]:
-    """
-    Génère metadata iPhone avec :
-    - Device fixé (device_choice = clé du _IPHONE_MAP, ex: 'iphone_16_pro_max')
-    - GPS fixé (lat/lng) avec drift cohérent entre vidéos d'un même batch
-    - Altitude cohérente avec la ville (passée via gps_alt)
-    - Creation time dans la fenêtre [target_hour - 1h, target_hour] heure locale VA
-
-    Args:
-        gps_alt : altitude en mètres de la ville (Miami=2, Denver=1600, etc.).
-                  Si None, random 0-200m (legacy).
-        drift_step : indice de la vidéo dans le batch (0, 1, 2, ...).
-                     Permet une dérive GPS cohérente comme si la personne marchait.
-
-    Utilisé pour les comptes Insta avec device + GPS lockés et fenêtres horaires.
-    """
-    # 1) Trouve le modèle iPhone à partir de la clé device_choice
-    model_name = _IPHONE_MAP.get(device_choice)
-    if not model_name:
-        # Fallback : random iPhone si clé inconnue
-        return _iphone_metadata()
-
-    ios_versions = None
-    for m, vers in IPHONE_MODELS:
-        if m == model_name:
-            ios_versions = vers
-            break
-    if not ios_versions:
-        return _iphone_metadata()
-
-    ios_version = random.choice(ios_versions)
-
-    # 2) GPS avec drift cohérent + altitude correcte de la ville
-    location_str = _iso6709_for_account(gps_lat, gps_lng, alt=gps_alt, drift_step=drift_step)
-
-    # 3) Creation time dans la fenêtre cible
-    tz_offset = TIMEZONE_OFFSETS.get(tz_name.lower(), 1)
-    base_date = _datetime_for_window(target_hour, tz_offset)
-    timings = _random_timings(base_date)
-
-    content_uuid = _apple_uuid()
-
-    base = {
-        "comment": "", "description": "", "title": "", "artist": "", "album": "",
-        "make": "Apple",
-        "model": model_name,
-        "com.apple.quicktime.make": "Apple",
-        "com.apple.quicktime.model": model_name,
-        "com.apple.quicktime.software": ios_version,
-        "location": location_str,
-        "location-eng": location_str,
-        "com.apple.quicktime.location.ISO6709": location_str,
-        "com.apple.quicktime.location.accuracy.horizontal": f"{random.uniform(4.5, 15.0):.6f}",
-        "creation_time": timings["format_time"],
-        "date": timings["format_time"][:10],
-        "com.apple.quicktime.creationdate": timings["apple_creationdate"],
-        "com.apple.quicktime.content.identifier": content_uuid,
-        "encoder": "",
-        "_platform": "iphone",
-        "_video_creation_time": timings["v_stream_time"],
-        "_audio_creation_time": timings["a_stream_time"],
-        "_stream_encoder_lavc": "H.264",
-        "_video_handler_name": "Core Media Video",
-        "_audio_handler_name": "Core Media Audio",
-    }
-    # Ajout des champs Apple supplémentaires (capture mode, faces, etc.)
-    base.update(_apple_extra_fields())
-    return base
