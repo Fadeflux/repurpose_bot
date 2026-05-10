@@ -760,12 +760,20 @@ def mix_batch_stream(
         window = window_assignments[idx] if idx < len(window_assignments) else None
         if account and window:
             target_hour, window_label = window
+            # Lookup altitude cohérente avec la ville (Miami=2m, Denver=1600m, etc.)
+            try:
+                from app.services import cf_storage as _cfs_alt
+                gps_alt = _cfs_alt.get_city_altitude(account.get("gps_city", ""))
+            except Exception:
+                gps_alt = None
             spoof_meta = metadata_randomizer.iphone_metadata_for_account(
                 device_choice=account["device_choice"],
                 gps_lat=float(account["gps_lat"]),
                 gps_lng=float(account["gps_lng"]),
                 target_hour=target_hour,
                 tz_name=tz_name,
+                gps_alt=gps_alt,
+                drift_step=idx,  # idx croît dans la batch → drift cohérent
             )
             device_label = spoof_meta.get("model", "?")
             yield {"type": "log", "level": "INFO",
@@ -779,9 +787,23 @@ def mix_batch_stream(
 
         # Tirage aléatoire des params spoof vidéo (différent à chaque variante)
         # Si enabled_filters est None -> tous activés, sinon seulement ceux listés
+        # Si compte avec device locké, on override le bitrate range pour qu'il soit
+        # cohérent avec le device (16e plus bas que 17 Pro Max)
+        device_custom_ranges = dict(custom_ranges or {})
+        target_fps = None
+        if account and window:
+            try:
+                device_specs = metadata_randomizer.get_device_specs(spoof_meta.get("model", ""))
+                # Override le range bitrate pour ce device
+                device_custom_ranges["bitrate"] = device_specs["bitrate_kbps"]
+                # Choisir un fps cohérent avec le device (30 ou 60 selon device)
+                target_fps = random.choice(device_specs["fps_choices"])
+            except Exception:
+                pass
+
         spoof_params = _random_spoof_params(
             enabled_filters=enabled_filters,
-            custom_ranges=custom_ranges,
+            custom_ranges=device_custom_ranges,
         )
 
         cmd, ass_path = _build_ffmpeg_cmd(
@@ -794,6 +816,10 @@ def mix_batch_stream(
             caption_style=caption_style,
             spoof_params=spoof_params,
         )
+        # Force le frame rate de sortie selon le device (cohérence iPhone)
+        # On insère -r juste avant le fichier de sortie (= dernier élément cmd)
+        if target_fps:
+            cmd = cmd[:-1] + ["-r", str(target_fps)] + [cmd[-1]]
         cmd_with_progress = cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:]
 
         item_started = time.time()
@@ -1084,6 +1110,7 @@ def mix_batch_stream(
             duration_seconds=round(total_elapsed, 2),
             model_id=int(model_id) if model_id else None,
             model_label=_model_label_to_save,
+            account_username=(account.get("username", "") if account else ""),
         )
     except Exception as e:
         logger.warning(f"Save batch history échoué: {e}")

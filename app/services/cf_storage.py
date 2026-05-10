@@ -164,6 +164,13 @@ def init_schema() -> bool:
                     ADD COLUMN IF NOT EXISTS model_id INTEGER DEFAULT NULL
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_cf_videos_model ON cf_videos(model_id)")
+                # Migration : ajout colonne account_username sur cf_batches
+                # Permet de tracker quel compte Insta a été utilisé (pour intervalle min)
+                cur.execute("""
+                    ALTER TABLE cf_batches
+                    ADD COLUMN IF NOT EXISTS account_username TEXT DEFAULT ''
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_cf_batches_account ON cf_batches(account_username)")
             conn.commit()
         logger.info("ClipFusion DB schema initialisé")
         return True
@@ -703,6 +710,7 @@ def add_batch(
     duration_seconds: float = 0.0,
     model_id: Optional[int] = None,
     model_label: str = "",
+    account_username: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Enregistre un batch de mix dans l'historique."""
     if not is_db_enabled():
@@ -715,15 +723,16 @@ def add_batch(
                     "INSERT INTO cf_batches "
                     "(id, va_name, team, device_choice, videos_count, videos_uploaded, "
                     " drive_folder_id, drive_folder_url, drive_folder_name, va_email, "
-                    " discord_notified, duration_seconds, model_id, model_label) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    " discord_notified, duration_seconds, model_id, model_label, account_username) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                     "RETURNING id, va_name, team, device_choice, videos_count, videos_uploaded, "
                     "drive_folder_id, drive_folder_url, drive_folder_name, va_email, "
                     "discord_notified, duration_seconds, created_at",
                     (bid, va_name, team, device_choice, videos_count, videos_uploaded,
                      drive_folder_id, drive_folder_url, drive_folder_name, va_email,
                      discord_notified, duration_seconds,
-                     int(model_id) if model_id else None, model_label or ""),
+                     int(model_id) if model_id else None, model_label or "",
+                     account_username or ""),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -835,6 +844,33 @@ def count_va_videos_recent(va_name: str, days: int = 3) -> int:
     except Exception as e:
         logger.error(f"count_va_videos_recent failed: {e}")
         return 0
+
+
+def get_last_batch_time_for_account(account_username: str) -> Optional[datetime]:
+    """
+    Retourne la datetime UTC du dernier batch (réussi) sur un compte donné.
+    None si aucun batch trouvé.
+    Utilisé pour empêcher le spam d'un même compte (anti-pattern non humain).
+    """
+    if not is_db_enabled() or not account_username:
+        return None
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT MAX(created_at) "
+                    "FROM cf_batches "
+                    "WHERE account_username = %s "
+                    "AND videos_count > 0",
+                    (account_username,),
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    return row[0]
+                return None
+    except Exception as e:
+        logger.error(f"get_last_batch_time_for_account failed: {e}")
+        return None
 
 
 def get_batches_stats() -> Dict[str, Any]:
@@ -968,17 +1004,19 @@ def get_model(model_id: int) -> Optional[Dict[str, Any]]:
 # Chaque compte = 1 device locked + 1 GPS locked + 1 modèle associé
 # ---------------------------------------------------------------------------
 # Liste des 10 grandes villes US pour le tirage GPS au 1er /request
+# Format : (label, lat, lng, altitude_meters)
+# Altitudes réelles approximatives (centre-ville) pour cohérence
 US_CITIES_GPS = [
-    ("Miami, FL",        25.7617,  -80.1918),
-    ("New York, NY",     40.7128,  -74.0060),
-    ("Los Angeles, CA",  34.0522, -118.2437),
-    ("Chicago, IL",      41.8781,  -87.6298),
-    ("Houston, TX",      29.7604,  -95.3698),
-    ("Phoenix, AZ",      33.4484, -112.0740),
-    ("Philadelphia, PA", 39.9526,  -75.1652),
-    ("San Antonio, TX",  29.4241,  -98.4936),
-    ("Dallas, TX",       32.7767,  -96.7970),
-    ("Atlanta, GA",      33.7490,  -84.3880),
+    ("Miami, FL",        25.7617,  -80.1918,    2),
+    ("New York, NY",     40.7128,  -74.0060,   10),
+    ("Los Angeles, CA",  34.0522, -118.2437,   89),
+    ("Chicago, IL",      41.8781,  -87.6298,  179),
+    ("Houston, TX",      29.7604,  -95.3698,   13),
+    ("Phoenix, AZ",      33.4484, -112.0740,  331),
+    ("Philadelphia, PA", 39.9526,  -75.1652,   12),
+    ("San Antonio, TX",  29.4241,  -98.4936,  198),
+    ("Dallas, TX",       32.7767,  -96.7970,  131),
+    ("Atlanta, GA",      33.7490,  -84.3880,  320),
 ]
 
 # Liste des devices iPhone disponibles pour le tirage au 1er /request
@@ -1001,6 +1039,21 @@ def _row_to_account(row) -> Dict[str, Any]:
         "gps_city": row[8],
         "created_at": row[9].isoformat() if row[9] else None,
     }
+
+
+def get_city_altitude(city_name: str) -> int:
+    """
+    Retourne l'altitude (mètres) pour une ville US connue.
+    Utilisé pour cohérence GPS : un compte locké à Miami doit avoir
+    altitude ~2m, pas 187m random.
+    Fallback : 50m (moyenne plausible) si ville inconnue.
+    """
+    if not city_name:
+        return 50
+    for label, _lat, _lng, alt in US_CITIES_GPS:
+        if label == city_name:
+            return alt
+    return 50
 
 
 def find_account(username: str, model_id: int) -> Optional[Dict[str, Any]]:
@@ -1050,6 +1103,7 @@ def create_account(
         gps_city = city[0]
         gps_lat = city[1]
         gps_lng = city[2]
+        # Note : altitude (city[3]) pas stockée en DB ; lookup dynamique via get_city_altitude()
 
     try:
         with _get_connection() as conn:

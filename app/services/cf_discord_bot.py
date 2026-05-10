@@ -629,6 +629,37 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                             f"({account_data['device_choice'].replace('_', ' ').title()} · {account_data['gps_city']})"
                         )
 
+        # 4c. INTERVALLE MIN entre batchs sur le même compte (anti-pattern non humain)
+        # Variable d'env CF_MIN_INTERVAL_HOURS_PER_ACCOUNT (default 6h)
+        # Si 0, désactivé. Bypass admin (comme rate limit).
+        if account_data and not is_admin_user and not is_new_account:
+            try:
+                min_interval_h = int(os.environ.get("CF_MIN_INTERVAL_HOURS_PER_ACCOUNT", "6"))
+            except Exception:
+                min_interval_h = 6
+            if min_interval_h > 0:
+                last_batch_time = cf_storage.get_last_batch_time_for_account(account_data["username"])
+                if last_batch_time:
+                    from datetime import datetime, timezone, timedelta
+                    now_utc = datetime.now(timezone.utc)
+                    # Si last_batch_time est naive, on le considère en UTC
+                    if last_batch_time.tzinfo is None:
+                        last_batch_time = last_batch_time.replace(tzinfo=timezone.utc)
+                    elapsed = now_utc - last_batch_time
+                    if elapsed < timedelta(hours=min_interval_h):
+                        wait = timedelta(hours=min_interval_h) - elapsed
+                        h = int(wait.total_seconds() // 3600)
+                        m = int((wait.total_seconds() % 3600) // 60)
+                        wait_str = f"{h}h{m:02d}" if h > 0 else f"{m} min"
+                        await interaction.response.send_message(
+                            f"⏰ **Intervalle min non respecté pour @{account_data['username']}**\n"
+                            f"Le dernier batch sur ce compte a eu lieu il y a moins de **{min_interval_h}h**.\n"
+                            f"Reviens dans **{wait_str}** pour que ce compte ne paraisse pas suspect.\n"
+                            f"_(anti-pattern non humain : poster 60 vidéos toutes les 30 min = drapeau rouge)_",
+                            ephemeral=True,
+                        )
+                        return
+
         # Détermine la timezone selon la team (geelark = Bénin par défaut)
         # On peut surcharger via env var CF_TZ_GEELARK / CF_TZ_INSTAGRAM
         tz_name = os.environ.get(f"CF_TZ_{team.upper()}", "benin").lower().strip()
