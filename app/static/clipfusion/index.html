@@ -297,10 +297,21 @@
 
         <div class="card">
             <label class="card-label">📂 DOSSIER DES VIDÉOS BRUTES</label>
-            <div class="folder-row">
-                <input type="text" id="folder-path-display" placeholder="Glisse tes vidéos ici, ou clique sur Charger pour choisir un dossier" readonly>
-                <button class="btn btn-ghost" id="btn-load-folder" type="button">📂 Charger</button>
+
+            <!-- Zone unique drag-drop (fusion des 2 anciennes zones) -->
+            <div class="paste-zone" id="video-drop-zone" tabindex="0" style="margin-bottom:16px;">
+                <div class="paste-icon" style="font-size:48px;">🎬</div>
+                <div class="paste-title" style="font-size:18px;font-weight:600;">Glisse tes vidéos ici</div>
+                <div class="muted" style="margin-bottom:12px;">Glisse des fichiers OU un dossier entier — playback sans caption ni musique</div>
+                <input type="file" id="video-input" accept="video/*" multiple hidden>
+                <input type="file" id="video-folder-input" webkitdirectory directory multiple hidden>
+                <!-- Inputs cachés pour compat JS existant -->
+                <input type="text" id="folder-path-display" style="display:none;" readonly>
                 <input type="file" id="folder-loader" webkitdirectory directory multiple hidden>
+                <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:8px;">
+                    <button class="btn btn-ghost" id="btn-pick-videos" type="button">📁 Choisir fichiers</button>
+                    <button class="btn btn-ghost" id="btn-pick-folder" type="button">📂 Choisir dossier</button>
+                </div>
             </div>
 
             <div class="filter-section">
@@ -327,18 +338,8 @@
             <div class="folder-actions">
                 <button class="btn btn-scan" id="btn-scan" disabled>🔍 SCANNER & TRIER</button>
                 <button class="btn btn-ghost" id="btn-load-all" type="button">📥 Tout charger</button>
-            </div>
-        </div>
-
-        <div class="paste-zone" id="video-drop-zone" tabindex="0">
-            <div class="paste-icon">🎬</div>
-            <div class="paste-title">Sélectionner des vidéos brutes</div>
-            <div class="muted" style="margin-bottom:12px;">Glisse des fichiers OU un dossier entier — playback sans caption ni musique</div>
-            <input type="file" id="video-input" accept="video/*" multiple hidden>
-            <input type="file" id="video-folder-input" webkitdirectory directory multiple hidden>
-            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:8px;">
-                <button class="btn btn-ghost" id="btn-pick-videos" type="button">📁 Choisir fichiers</button>
-                <button class="btn btn-ghost" id="btn-pick-folder" type="button">📂 Choisir dossier</button>
+                <!-- Bouton caché pour compat JS existant -->
+                <button class="btn btn-ghost" id="btn-load-folder" type="button" style="display:none;"></button>
             </div>
         </div>
 
