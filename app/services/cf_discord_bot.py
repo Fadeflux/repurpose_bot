@@ -55,10 +55,15 @@ def _default_team() -> str:
 
 
 def _max_videos_per_request() -> int:
+    """
+    Limite max de vidéos par /request (par compte, par batch).
+    18 = pile-poil 6 par fenêtre horaire (matin/soir/nuit), bonne pratique
+    anti-détection (pas trop de posts par fenêtre, ressemble à un humain).
+    """
     try:
-        return int(os.environ.get("CF_REQUEST_MAX_VIDEOS", "200"))
+        return int(os.environ.get("CF_REQUEST_MAX_VIDEOS", "18"))
     except Exception:
-        return 200
+        return 18
 
 
 def _channel_msg_ttl() -> int:
@@ -145,14 +150,14 @@ def _rate_limit_config() -> tuple:
     """
     Retourne (max_videos, period_days) pour le rate limit.
     Variables d'env :
-      CF_RATE_LIMIT_VIDEOS  : quota de vidéos sur la période (default 300)
+      CF_RATE_LIMIT_VIDEOS  : quota de vidéos sur la période (default 500)
       CF_RATE_LIMIT_DAYS    : période en jours (default 3)
     Si CF_RATE_LIMIT_VIDEOS = 0, le rate limit est désactivé.
     """
     try:
-        max_v = int(os.environ.get("CF_RATE_LIMIT_VIDEOS", "300"))
+        max_v = int(os.environ.get("CF_RATE_LIMIT_VIDEOS", "500"))
     except Exception:
-        max_v = 300
+        max_v = 500
     try:
         days = max(1, int(os.environ.get("CF_RATE_LIMIT_DAYS", "3")))
     except Exception:
@@ -500,7 +505,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
 
     @bot.tree.command(name="request", description="Demander un batch ClipFusion (vidéos prêtes à poster)")
     @app_commands.describe(
-        quantite="Nombre de vidéos à générer (max 200)",
+        quantite="Nombre de vidéos à générer (max 18 par compte, réparties sur 3 fenêtres horaires)",
         modele="ID du modèle (créatrice). Liste les modèles avec /models",
         compte="Username du compte Insta (sans @). Tape pour autocomplete tes comptes.",
     )
