@@ -100,20 +100,31 @@ def _google_vision(image_path: str, credentials_json: str) -> str:
         content = f.read()
     image = vision.Image(content=content)
 
+    # ImageContext avec language hints pour aider sur l'anglais (texte Insta)
+    # et améliorer la détection des emojis (Google Vision les lit comme des "Cn" Unicode)
+    image_context = vision.ImageContext(language_hints=["en"])
+
     # document_text_detection est plus performant pour les overlays/textes denses
     # que text_detection (utilisé pour les photos de panneaux/etc.)
-    response = client.document_text_detection(image=image)
+    response = client.document_text_detection(
+        image=image,
+        image_context=image_context,
+    )
 
     if response.error.message:
         raise RuntimeError(f"Google Vision API error: {response.error.message}")
 
-    # full_text_annotation contient le texte complet structuré
+    # Log brut pour diagnostic (montre exactement ce que Google a renvoyé)
     if response.full_text_annotation and response.full_text_annotation.text:
-        return response.full_text_annotation.text
+        raw = response.full_text_annotation.text
+        logger.info(f"[OCR/GoogleVision] RAW result ({len(raw)} chars): {repr(raw[:200])}")
+        return raw
 
     # Fallback : essaie text_annotations[0] si full_text vide
     if response.text_annotations:
-        return response.text_annotations[0].description
+        raw = response.text_annotations[0].description
+        logger.info(f"[OCR/GoogleVision] RAW (text_annotations) ({len(raw)} chars): {repr(raw[:200])}")
+        return raw
 
     return ""
 
@@ -210,7 +221,11 @@ def _tesseract(image_path: str) -> str:
 # Cleaning
 # ---------------------------------------------------------------------------
 def _clean_caption(raw: str) -> str:
-    """Clean up OCR output to keep only the meaningful caption."""
+    """
+    Clean up OCR output to keep only the meaningful caption.
+    Preserves lines that have alphanumeric chars OR emojis (Unicode > U+2600).
+    Single emojis (1 char) are also preserved.
+    """
     if not raw:
         return ""
     lines = [ln.strip() for ln in raw.splitlines()]
@@ -218,9 +233,14 @@ def _clean_caption(raw: str) -> str:
     for ln in lines:
         if not ln:
             continue
-        if len(ln) < 2:
+        # Check si la ligne contient au moins un caractère utile (lettre/chiffre/emoji)
+        has_alnum = any(c.isalnum() for c in ln)
+        has_emoji = any(ord(c) >= 0x2600 for c in ln)
+        if not (has_alnum or has_emoji):
             continue
-        if not any(c.isalnum() for c in ln):
+        # Filtre des lignes trop courtes (genre "a", "I"), MAIS on garde les
+        # lignes courtes qui contiennent un emoji (genre "💕" ou "🤝")
+        if len(ln) < 2 and not has_emoji:
             continue
         cleaned.append(ln)
     return "\n".join(cleaned).strip()
