@@ -502,13 +502,13 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
     @app_commands.describe(
         quantite="Nombre de vidéos à générer (max 200)",
         modele="ID du modèle (créatrice). Liste les modèles avec /models",
-        compte="Username du compte Insta (sans @). Active le mode fenêtres horaires + device locked.",
+        compte="Username du compte Insta (sans @). Tape pour autocomplete tes comptes.",
     )
     async def request_cmd(
         interaction: "discord.Interaction",
         quantite: int,
         modele: int,
-        compte: Optional[str] = None,
+        compte: str,
     ):
         # 1. Filtrage canal si configuré
         allowed = _get_request_channel_ids()
@@ -605,39 +605,62 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         guild_id = interaction.guild_id if interaction.guild_id else None
         team = _detect_team_from_guild(guild_id)
 
-        # Résolution du compte si fourni (sinon mode legacy : random complet, sans fenêtres)
+        # Résolution du compte (paramètre obligatoire)
+        # Cas possibles :
+        # - Compte n'existe pas → création auto (device + GPS US random lockés)
+        # - Compte existe ET appartient au VA → utilisation
+        # - Compte existe MAIS appartient à un AUTRE VA → REFUS (anti-vol de compte)
         account_data = None
         account_msg_extra = ""
         is_new_account = False
-        if compte:
-            # Nettoie le username (vire @ et espaces)
-            clean_username = compte.strip().lstrip("@").strip()
-            if clean_username:
-                # Tente de récupérer le compte ; sinon le crée avec random device + GPS USA
-                existing = cf_storage.find_account(clean_username, modele)
-                if existing:
-                    account_data = existing
-                else:
-                    is_new_account = True
-                    account_data = cf_storage.create_account(
-                        username=clean_username,
-                        model_id=modele,
-                        va_discord_id=str(interaction.user.id),
-                        va_name=interaction.user.display_name or interaction.user.name,
-                    )
+        clean_username = compte.strip().lstrip("@").strip() if compte else ""
+        if not clean_username:
+            await interaction.response.send_message(
+                "❌ Le nom du compte est invalide. Tape par exemple `compte:sara_official_2026` (sans @).",
+                ephemeral=True,
+            )
+            return
 
-                if account_data:
-                    if is_new_account:
-                        account_msg_extra = (
-                            f"\n✨ Nouveau compte créé : @**{account_data['username']}**\n"
-                            f"📱 Device : **{account_data['device_choice'].replace('_', ' ').title()}**\n"
-                            f"📍 GPS : **{account_data['gps_city']}**"
-                        )
-                    else:
-                        account_msg_extra = (
-                            f"\n🔒 Compte connu : @**{account_data['username']}** "
-                            f"({account_data['device_choice'].replace('_', ' ').title()} · {account_data['gps_city']})"
-                        )
+        existing = cf_storage.find_account(clean_username, modele)
+        user_id_str = str(interaction.user.id)
+
+        if existing:
+            # Compte déjà créé : vérifier la propriété (sauf admin qui peut tout)
+            owner_id = str(existing.get("va_discord_id", "") or "")
+            if owner_id and owner_id != user_id_str and not is_admin_user:
+                # Trouver le nom du vrai propriétaire pour le message d'erreur
+                owner_name = existing.get("va_name", "un autre VA")
+                await interaction.response.send_message(
+                    f"❌ Le compte **@{clean_username}** appartient déjà à **{owner_name}**.\n"
+                    f"Si c'est une erreur, demande à un admin de le réassigner.",
+                    ephemeral=True,
+                )
+                return
+            account_data = existing
+            account_msg_extra = (
+                f"\n🔒 Compte connu : @**{account_data['username']}** "
+                f"({account_data['device_choice'].replace('_', ' ').title()} · {account_data['gps_city']})"
+            )
+        else:
+            # Création auto : random device + GPS US, lockés à vie sur ce compte
+            is_new_account = True
+            account_data = cf_storage.create_account(
+                username=clean_username,
+                model_id=modele,
+                va_discord_id=user_id_str,
+                va_name=interaction.user.display_name or interaction.user.name,
+            )
+            if not account_data:
+                await interaction.response.send_message(
+                    f"❌ Impossible de créer le compte @{clean_username}. Réessaie ou ping un admin.",
+                    ephemeral=True,
+                )
+                return
+            account_msg_extra = (
+                f"\n✨ Nouveau compte créé : @**{account_data['username']}**\n"
+                f"📱 Device : **{account_data['device_choice'].replace('_', ' ').title()}**\n"
+                f"📍 GPS : **{account_data['gps_city']}**"
+            )
 
         # 4c. INTERVALLE MIN entre batchs sur le même compte (anti-pattern non humain)
         # Variable d'env CF_MIN_INTERVAL_HOURS_PER_ACCOUNT (default 6h)
@@ -782,33 +805,33 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         if _worker_task is None or _worker_task.done():
             _worker_task = asyncio.create_task(_worker_loop())
 
-    # Autocomplete pour le paramètre `compte` : propose les comptes que le VA
-    # a déjà utilisés pour le modèle sélectionné.
+    # Autocomplete pour le paramètre `compte` : propose UNIQUEMENT les comptes
+    # que ce VA précis a déjà utilisés pour le modèle sélectionné.
+    # Chaque VA voit ses propres comptes, JAMAIS ceux des autres (anti-confusion).
     @request_cmd.autocomplete("compte")
     async def compte_autocomplete(
         interaction: "discord.Interaction",
         current: str,
     ) -> List[app_commands.Choice[str]]:
         try:
-            # Récupère le model_id depuis les options déjà saisies (modele est requis)
+            user_id_str = str(interaction.user.id)
+
+            # Récupère le model_id depuis les options déjà saisies
             modele_value = None
             for opt in (interaction.data.get("options") or []):
                 if opt.get("name") == "modele":
                     modele_value = opt.get("value")
                     break
 
-            # Liste les comptes : filtré par modèle si dispo, sinon tous les comptes du VA
+            # Liste TOUS les comptes du VA (filtre strict par va_discord_id)
+            # Si modele est fourni, on filtre aussi par modèle pour réduire la liste
+            accounts = cf_storage.list_accounts(va_discord_id=user_id_str)
             if modele_value:
-                accounts = cf_storage.list_accounts(model_id=int(modele_value))
-                # Sécurité : on ne propose que les comptes appartenant à ce VA
-                # (sauf admin qui voit tout)
-                if not _is_admin(interaction.user):
-                    accounts = [
-                        a for a in accounts
-                        if a.get("va_discord_id") == str(interaction.user.id)
-                    ]
-            else:
-                accounts = cf_storage.list_accounts(va_discord_id=str(interaction.user.id))
+                try:
+                    mid = int(modele_value)
+                    accounts = [a for a in accounts if int(a.get("model_id", 0)) == mid]
+                except (ValueError, TypeError):
+                    pass
 
             # Filtre par texte tapé par le user
             cur_lower = (current or "").strip().lower().lstrip("@")
