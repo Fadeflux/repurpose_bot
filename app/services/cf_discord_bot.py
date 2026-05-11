@@ -949,13 +949,11 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
     @app_commands.describe(
         fichier="Le fichier (photo .jpg/.png/.heic OU vidéo .mp4/.mov) à respoofer",
         compte="Username du compte Insta (sans @). Le device + GPS du compte sont appliqués.",
-        modele="ID du modèle (créatrice). Liste les modèles avec /models",
     )
     async def respoof_cmd(
         interaction: "discord.Interaction",
         fichier: discord.Attachment,
         compte: str,
-        modele: int,
     ):
         from app.services import cf_respoof, cf_storage, drive_service
 
@@ -980,16 +978,9 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             )
             return
 
-        # 2. Validation modèle
-        model = cf_storage.get_model(modele)
-        if not model:
-            await interaction.response.send_message(
-                f"❌ Modèle ID **{modele}** introuvable.",
-                ephemeral=True,
-            )
-            return
-
-        # 3. Validation compte (anti-vol, création auto si nouveau)
+        # 2. Validation compte + résolution auto du modèle
+        # - Si compte existe → on prend son modele_id (peu importe le rôle)
+        # - Si compte n'existe pas → on prend le 1er rôle ID{X} du VA pour créer
         clean_username = compte.strip().lstrip("@").strip()
         if not clean_username:
             await interaction.response.send_message(
@@ -999,11 +990,21 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             return
 
         is_admin_user = _is_admin(interaction.user)
-        existing = cf_storage.find_account(clean_username, modele)
         user_id_str = str(interaction.user.id)
+
+        # Cherche le compte sans filtre de modèle (on prendra celui qui existe déjà)
+        existing = None
+        for m in cf_storage.list_models():
+            candidate = cf_storage.find_account(clean_username, m["id"])
+            if candidate:
+                existing = candidate
+                break
+
         is_new_account = False
+        modele = None
 
         if existing:
+            # Compte existe : check propriété + reprendre son model_id
             owner_id = str(existing.get("va_discord_id", "") or "")
             if owner_id and owner_id != user_id_str and not is_admin_user:
                 owner_name = existing.get("va_name", "un autre VA")
@@ -1013,7 +1014,21 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 )
                 return
             account_data = existing
+            modele = int(existing.get("model_id", 0))
         else:
+            # Nouveau compte : déduit le modèle depuis les rôles ID{X} du VA
+            allowed_ids = _allowed_models_for_member(interaction.user)
+            if not allowed_ids:
+                await interaction.response.send_message(
+                    f"❌ Tu n'as aucun rôle `ID{{N}}` sur ce serveur, donc impossible de créer "
+                    f"le compte **@{clean_username}**.\n"
+                    f"Demande à un admin de t'attribuer un rôle `ID1`, `ID2`, etc. selon le(s) modèle(s) "
+                    f"sur lesquels tu travailles.",
+                    ephemeral=True,
+                )
+                return
+            # On prend le PLUS PETIT id (souvent le rôle principal du VA)
+            modele = min(allowed_ids)
             is_new_account = True
             account_data = cf_storage.create_account(
                 username=clean_username,
@@ -1027,6 +1042,9 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                     ephemeral=True,
                 )
                 return
+
+        # Récupère les infos du modèle pour les logs / DM
+        model = cf_storage.get_model(modele) or {"id": modele, "label": f"ID{modele}"}
 
         # 4. Rate limit (compte 1 vidéo dans le quota)
         if not is_admin_user:
@@ -1227,7 +1245,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         except Exception as e:
             logger.warning(f"DM respoof failed: {e}")
 
-    # Autocomplete pour le param `compte` (filtre par VA + modèle)
+    # Autocomplete pour le param `compte` (filtre uniquement par VA, tous modèles confondus)
     @respoof_cmd.autocomplete("compte")
     async def respoof_compte_autocomplete(
         interaction: "discord.Interaction",
@@ -1235,18 +1253,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
     ) -> List[app_commands.Choice[str]]:
         try:
             user_id_str = str(interaction.user.id)
-            modele_value = None
-            for opt in (interaction.data.get("options") or []):
-                if opt.get("name") == "modele":
-                    modele_value = opt.get("value")
-                    break
             accounts = cf_storage.list_accounts(va_discord_id=user_id_str)
-            if modele_value:
-                try:
-                    mid = int(modele_value)
-                    accounts = [a for a in accounts if int(a.get("model_id", 0)) == mid]
-                except (ValueError, TypeError):
-                    pass
             cur_lower = (current or "").strip().lower().lstrip("@")
             filtered = [a for a in accounts if cur_lower in a.get("username", "").lower()]
             return [
