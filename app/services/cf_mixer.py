@@ -695,7 +695,42 @@ def mix_batch_stream(
     # window_assignments[i] = (target_hour, window_label) pour la i-ème pair
     # Si pas de compte, tous à None → comportement legacy (random complet)
     window_assignments: List[Optional[Tuple[int, str]]] = [None] * total
+    # iOS du compte pour ce batch : décidé une seule fois en début de batch
+    # (toutes les vidéos du batch auront le même iOS, comme un vrai humain)
+    batch_ios_version = None
     if account and total > 0:
+        # Décide l'iOS pour ce batch (dernière version dispo pour ce device)
+        try:
+            device_choice = account.get("device_choice", "")
+            model_name = metadata_randomizer._IPHONE_MAP.get(device_choice, "iPhone 16 Pro Max")
+            # Récupère les iOS dispo pour ce modèle et prend la dernière (la plus récente)
+            for m, ios_versions in metadata_randomizer.IPHONE_MODELS:
+                if m == model_name:
+                    batch_ios_version = ios_versions[-1]
+                    break
+            if not batch_ios_version:
+                batch_ios_version = "26.4.1"
+
+            # Update DB si différent de l'ancien
+            current_ios = account.get("ios_version", "") or ""
+            if account.get("id") and current_ios != batch_ios_version:
+                try:
+                    from app.services import cf_storage as _cfs_ios
+                    _cfs_ios.update_account_ios(int(account["id"]), batch_ios_version)
+                    account["ios_version"] = batch_ios_version
+                    if current_ios:
+                        yield {"type": "log", "level": "INFO",
+                               "message": f"📱 iOS update : {current_ios} → {batch_ios_version} (compte @{account.get('username','?')})"}
+                    else:
+                        yield {"type": "log", "level": "INFO",
+                               "message": f"📱 iOS initial : {batch_ios_version} pour @{account.get('username','?')}"}
+                except Exception as _ios_err:
+                    yield {"type": "log", "level": "WARN",
+                           "message": f"iOS DB update failed: {_ios_err}"}
+        except Exception as _pick_err:
+            yield {"type": "log", "level": "WARN",
+                   "message": f"iOS pick failed, fallback random: {_pick_err}"}
+
         # Répartition : matin (1/3 + extra), soir (1/3), nuit (1/3)
         # ex pour 10 → matin=4, soir=3, nuit=3
         n_per = total // 3
@@ -765,16 +800,28 @@ def mix_batch_stream(
                 from app.services import cf_storage as _cfs_alt
                 gps_alt = _cfs_alt.get_city_altitude(account.get("gps_city", ""))
             except Exception:
-                gps_alt = None
-            spoof_meta = metadata_randomizer.iphone_metadata_for_account(
-                device_choice=account["device_choice"],
-                gps_lat=float(account["gps_lat"]),
-                gps_lng=float(account["gps_lng"]),
-                target_hour=target_hour,
-                tz_name=tz_name,
-                gps_alt=gps_alt,
-                drift_step=idx,  # idx croît dans la batch → drift cohérent
+                gps_alt = 0
+
+            # Génère metadata iPhone pour le device locké au compte
+            model_name = metadata_randomizer._IPHONE_MAP.get(
+                account["device_choice"], "iPhone 16 Pro Max"
             )
+            spoof_meta = metadata_randomizer._iphone_metadata_fixed(model_name)
+            # Force la dernière iOS (cohérence sur tout le batch)
+            if batch_ios_version:
+                spoof_meta["com.apple.quicktime.software"] = batch_ios_version
+            # Override le GPS avec celui locké du compte
+            try:
+                location_str = metadata_randomizer._format_iso6709(
+                    float(account["gps_lat"]),
+                    float(account["gps_lng"]),
+                    float(gps_alt or 0),
+                )
+                spoof_meta["location"] = location_str
+                spoof_meta["location-eng"] = location_str
+                spoof_meta["com.apple.quicktime.location.ISO6709"] = location_str
+            except Exception:
+                pass
             device_label = spoof_meta.get("model", "?")
             yield {"type": "log", "level": "INFO",
                    "message": f"🔒 [{window_label} {target_hour}h] {device_label} · @{account.get('username', '?')}"}
@@ -789,12 +836,24 @@ def mix_batch_stream(
         # Si enabled_filters est None -> tous activés, sinon seulement ceux listés
         # Si compte avec device locké, on override le bitrate range pour qu'il soit
         # cohérent avec le device (Pro Max plus haut, etc.)
+        # Si compte avec device locké, on override le bitrate range pour qu'il soit
+        # cohérent avec le device (Pro Max plus haut, etc.)
         device_custom_ranges = dict(custom_ranges or {})
         if account and window:
             try:
-                device_specs = metadata_randomizer.get_device_specs(spoof_meta.get("model", ""))
-                # Override le range bitrate pour ce device
-                device_custom_ranges["bitrate"] = device_specs["bitrate_kbps"]
+                # Bitrate table par modèle (kbps)
+                _BITRATE_BY_MODEL = {
+                    "iPhone 17 Pro Max": (12000, 18000),
+                    "iPhone 17 Pro":     (12000, 18000),
+                    "iPhone 17 Air":     (10000, 15000),
+                    "iPhone 17":         (10000, 15000),
+                    "iPhone 16 Pro Max": (12000, 18000),
+                    "iPhone 16 Pro":     (12000, 18000),
+                    "iPhone 16 Plus":    (10000, 15000),
+                    "iPhone 16":         (10000, 15000),
+                }
+                bitrate_range = _BITRATE_BY_MODEL.get(spoof_meta.get("model", ""), (10000, 15000))
+                device_custom_ranges["bitrate"] = bitrate_range
                 # Note : on ne force PAS le fps de sortie. Garder le fps source
                 # évite les artefacts de compression (force 60 fps depuis source 30 fps
                 # = 2x plus de frames mais même bitrate = qualité dégradée).
