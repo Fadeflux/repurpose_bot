@@ -1026,7 +1026,7 @@ def mix_batch_stream(
                     if account:
                         for label, hour in [("matin", 9), ("soir", 17), ("nuit", 23)]:
                             subname = f"{['01_matin_8h-9h','02_soir_16h-17h','03_nuit_22h-23h'][['matin','soir','nuit'].index(label)]}"
-                            sub_id = drive_service.create_subfolder(folder_id, subname)
+                            sub_id = drive_service.get_or_create_subfolder(folder_id, subname)
                             if sub_id:
                                 subfolder_ids[label] = sub_id
                                 yield {"type": "log", "level": "INFO", "message": f"📁 Sous-dossier {subname} créé"}
