@@ -2400,13 +2400,41 @@ function renderModelsList() {
         row.innerHTML = `
             <div class="va-admin-name">
                 ${escapeHtml(m.label)}
-                <span class="va-admin-team-badge">ID ${m.id}</span>
             </div>
             <div style="flex:1;"></div>
-            <button class="hist-delete-btn" data-id="${m.id}" title="Supprimer ce modèle">✕ Supprimer</button>
+            <button class="hist-delete-btn" data-action="edit" data-id="${m.id}" data-label="${escapeHtml(m.label)}" title="Modifier ce modèle" style="background:#3b82f6;">✎ Modifier</button>
+            <button class="hist-delete-btn" data-action="delete" data-id="${m.id}" title="Supprimer ce modèle">✕ Supprimer</button>
         `;
         list.appendChild(row);
-        row.querySelector('.hist-delete-btn').addEventListener('click', async () => {
+
+        // Bouton MODIFIER
+        row.querySelector('[data-action="edit"]').addEventListener('click', async () => {
+            const newLabel = prompt(`Renommer le modèle "${m.label}" :`, m.label);
+            if (newLabel === null) return; // annulé
+            const clean = newLabel.trim();
+            if (!clean) {
+                toast('Le nom ne peut pas être vide', true);
+                return;
+            }
+            if (clean === m.label) return; // pas changé
+            try {
+                const fd = new FormData();
+                fd.append('label', clean);
+                const r = await fetch(API + '/models/' + m.id, { method: 'PATCH', body: fd });
+                if (r.ok) {
+                    toast(`✓ Modèle renommé en "${clean}"`);
+                    await loadModels();
+                } else {
+                    const err = await r.text();
+                    toast('Modification échouée: ' + err, true);
+                }
+            } catch (e) {
+                toast('Erreur: ' + e.message, true);
+            }
+        });
+
+        // Bouton SUPPRIMER
+        row.querySelector('[data-action="delete"]').addEventListener('click', async () => {
             if (!confirm(`Supprimer le modèle "${m.label}" ?\n(Les batches déjà créés gardent leur référence.)`)) return;
             try {
                 const r = await fetch(API + '/models/' + m.id, { method: 'DELETE' });
