@@ -22,7 +22,10 @@ from __future__ import annotations
 import asyncio
 import os
 import random
+import tempfile
+import uuid
 from datetime import datetime
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -1095,7 +1098,6 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             return
 
         # 8. Sauvegarde temporaire en local
-        import tempfile, uuid
         tmpdir = Path(tempfile.gettempdir()) / "cf_respoof"
         tmpdir.mkdir(parents=True, exist_ok=True)
         in_ext = Path(fichier.filename).suffix.lower() or ".bin"
@@ -1165,7 +1167,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             # Mime type selon le type de fichier
             mime = "image/jpeg" if file_type == "photo" else "video/mp4"
             up = drive_service.upload_file(
-                local_path=tmp_out,
+                local_path=str(tmp_out),
                 folder_id=folder_id,
                 mime_type=mime,
             )
