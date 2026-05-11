@@ -764,6 +764,30 @@ def mix_batch_stream(
     yield {"type": "log", "level": "INFO", "message": f"Output: {OUTPUT_DIR.name}/"}
     yield {"type": "log", "level": "INFO", "message": "Caption pre-render OK"}
 
+    # ===== CLEANUP : supprime les fichiers orphelins du dernier batch =====
+    # (mix_*.mp4 et _caption_*.ass laissés par des batchs précédents qui ont planté)
+    try:
+        cleaned_count = 0
+        cleaned_bytes = 0
+        for f in OUTPUT_DIR.glob("mix_*.mp4"):
+            try:
+                cleaned_bytes += f.stat().st_size
+                f.unlink()
+                cleaned_count += 1
+            except Exception:
+                pass
+        for f in OUTPUT_DIR.glob("_caption_*.ass"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+        if cleaned_count > 0:
+            mb = cleaned_bytes / (1024 * 1024)
+            yield {"type": "log", "level": "INFO",
+                   "message": f"🧹 Cleanup: {cleaned_count} anciens fichiers supprimés ({mb:.1f} MB libérés)"}
+    except Exception as _clean_err:
+        yield {"type": "log", "level": "WARN", "message": f"Cleanup start failed: {_clean_err}"}
+
     started = time.time()
     output_metas: List[Dict[str, Any]] = []
 
@@ -1049,6 +1073,14 @@ def mix_batch_stream(
                                 m["drive_id"] = up.get("id")
                                 m["drive_url"] = up.get("webViewLink", "")
                                 uploaded_count += 1
+                                # CLEANUP : supprime le fichier local après upload réussi
+                                # pour libérer l'espace disque (volume Railway limité)
+                                try:
+                                    if local_path.exists():
+                                        local_path.unlink()
+                                except Exception as _cleanup_err:
+                                    yield {"type": "log", "level": "WARN",
+                                           "message": f"Cleanup failed for {local_path.name}: {_cleanup_err}"}
                             else:
                                 yield {"type": "log", "level": "WARN", "message": f"❌ Upload failed: {local_path.name}"}
                         except Exception as up_err:
