@@ -954,11 +954,18 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
     @app_commands.describe(
         fichier="Le fichier (photo .jpg/.png/.heic OU vidéo .mp4/.mov) à respoofer",
         compte="Username du compte Insta (sans @). Le device + GPS du compte sont appliqués.",
+        fenetre="Fenêtre horaire pour les metadata (matin/soir/nuit). Cohérent avec ton heure de post.",
     )
+    @app_commands.choices(fenetre=[
+        app_commands.Choice(name="🌅 Matin (8h-9h)", value="matin"),
+        app_commands.Choice(name="🌆 Soir (16h-17h)", value="soir"),
+        app_commands.Choice(name="🌙 Nuit (22h-23h)", value="nuit"),
+    ])
     async def respoof_cmd(
         interaction: "discord.Interaction",
         fichier: discord.Attachment,
         compte: str,
+        fenetre: app_commands.Choice[str],
     ):
         from app.services import cf_respoof, cf_storage, drive_service
 
@@ -1106,13 +1113,20 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         tmp_in = tmpdir / f"respoof_in_{uuid.uuid4().hex}{in_ext}"
         tmp_in.write_bytes(file_bytes)
 
-        # 9. Détermine team / tz / target_hour
+        # 9. Détermine team / tz / target_hour (depuis la fenêtre choisie par le VA)
         team = _detect_team_from_guild(interaction.guild_id if interaction.guild else None)
         tz_name = os.environ.get(f"CF_TZ_{team.upper()}", "benin").lower().strip()
         if tz_name not in ("benin", "madagascar"):
             tz_name = "benin"
-        # Fenêtre horaire random parmi les 3 (matin/soir/nuit)
-        target_hour = random.choice([9, 17, 23])
+        # Fenêtre horaire selon le choix du VA (matin / soir / nuit)
+        _FENETRE_HOURS = {"matin": 9, "soir": 17, "nuit": 23}
+        fenetre_value = fenetre.value if hasattr(fenetre, "value") else str(fenetre)
+        target_hour = _FENETRE_HOURS.get(fenetre_value, 9)
+        fenetre_label = {
+            "matin": "🌅 Matin (8h-9h)",
+            "soir": "🌆 Soir (16h-17h)",
+            "nuit": "🌙 Nuit (22h-23h)",
+        }.get(fenetre_value, fenetre_value)
 
         # 10. Respoof
         try:
@@ -1229,7 +1243,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             f"🔒 Compte : @**{clean_username}** "
             f"({info.get('device_model', '?')} · {info.get('gps_city', '?')})\n"
             f"📱 iOS : `{info.get('software', '?')}`\n"
-            f"🕐 Fenêtre : {target_hour}h (TZ {tz_name})\n"
+            f"🕐 Fenêtre : {fenetre_label} (TZ {tz_name})\n"
         )
         if folder_url:
             ack += f"\n🔗 [Lien Drive]({folder_url})"
