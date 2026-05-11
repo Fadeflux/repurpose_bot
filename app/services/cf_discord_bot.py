@@ -1267,7 +1267,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         except Exception as e:
             logger.warning(f"DM respoof failed: {e}")
 
-    # Autocomplete pour le param `compte` (filtre uniquement par VA, tous modèles confondus)
+    # Autocomplete pour le param `compte` (filtre par VA, fallback admin = tous comptes)
     @respoof_cmd.autocomplete("compte")
     async def respoof_compte_autocomplete(
         interaction: "discord.Interaction",
@@ -1275,18 +1275,72 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
     ) -> List[app_commands.Choice[str]]:
         try:
             user_id_str = str(interaction.user.id)
-            accounts = cf_storage.list_accounts(va_discord_id=user_id_str)
+            is_admin_user = False
+            try:
+                is_admin_user = _is_admin(interaction.user)
+            except Exception:
+                pass
+
+            # Liste les comptes (admin = tous, sinon filtre VA)
+            try:
+                if is_admin_user:
+                    accounts = cf_storage.list_accounts(va_discord_id=None)
+                    logger.info(f"[respoof autocomplete] admin user {user_id_str}, list_accounts() = {len(accounts)} comptes")
+                else:
+                    accounts = cf_storage.list_accounts(va_discord_id=user_id_str)
+                    logger.info(f"[respoof autocomplete] user {user_id_str}, list_accounts(va_id=...) = {len(accounts)} comptes")
+            except Exception as e:
+                logger.error(f"[respoof autocomplete] list_accounts failed: {e}")
+                accounts = []
+
+            # Fallback : si rien trouvé pour le VA, on tente sans filtre (au cas où la
+            # DB a des comptes sans va_discord_id correct)
+            if not accounts and not is_admin_user:
+                try:
+                    all_accounts = cf_storage.list_accounts(va_discord_id=None)
+                    # On garde seulement ceux qui appartiennent à ce VA OU sans owner
+                    accounts = [
+                        a for a in all_accounts
+                        if str(a.get("va_discord_id", "") or "") in (user_id_str, "")
+                    ]
+                    logger.info(f"[respoof autocomplete] fallback retrieved {len(accounts)} comptes")
+                except Exception as e:
+                    logger.warning(f"[respoof autocomplete] fallback failed: {e}")
+
+            # Filtre par texte tapé
             cur_lower = (current or "").strip().lower().lstrip("@")
-            filtered = [a for a in accounts if cur_lower in a.get("username", "").lower()]
-            return [
-                app_commands.Choice(
-                    name=f"@{a['username']} ({a['device_choice'].replace('_', ' ')[:18]})",
-                    value=a["username"],
-                )
-                for a in filtered[:25]
-            ]
+            if cur_lower:
+                filtered = [
+                    a for a in accounts
+                    if cur_lower in str(a.get("username", "")).lower()
+                ]
+            else:
+                filtered = accounts
+
+            # Discord limite à 25 choix max
+            choices = []
+            for a in filtered[:25]:
+                try:
+                    username = a.get("username", "")
+                    if not username:
+                        continue
+                    device = str(a.get("device_choice", "") or "no-device").replace("_", " ")[:18]
+                    city = str(a.get("gps_city", "") or "")[:15]
+                    label = f"@{username}"
+                    if device or city:
+                        label += f" ({device}"
+                        if city:
+                            label += f" · {city}"
+                        label += ")"
+                    label = label[:100]  # Discord limit 100 chars
+                    choices.append(app_commands.Choice(name=label, value=username))
+                except Exception as e:
+                    logger.warning(f"[respoof autocomplete] entry skip: {e}")
+                    continue
+            logger.info(f"[respoof autocomplete] returning {len(choices)} choices")
+            return choices
         except Exception as e:
-            logger.warning(f"respoof autocomplete failed: {e}")
+            logger.error(f"[respoof autocomplete] outer failure: {e}", exc_info=True)
             return []
 
     logger.info("Slash commands ClipFusion installés (/request, /respoof, /models, /status)")
