@@ -25,6 +25,44 @@ from app.utils.storage_paths import BASE_DIR, OUTPUT_DIR
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _startup_cleanup() -> None:
+    """
+    Cleanup au démarrage du module : supprime les fichiers orphelins
+    (mix_*.mp4 et _caption_*.ass) du dossier output.
+    Ces fichiers sont des reliquats de batchs précédents qui n'ont pas été
+    cleanés (crash, redéploiement, etc.). Les sources ne sont PAS touchées.
+    """
+    try:
+        cleaned_count = 0
+        cleaned_bytes = 0
+        for f in OUTPUT_DIR.glob("mix_*.mp4"):
+            try:
+                cleaned_bytes += f.stat().st_size
+                f.unlink()
+                cleaned_count += 1
+            except Exception:
+                pass
+        for f in OUTPUT_DIR.glob("_caption_*.ass"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+        if cleaned_count > 0:
+            mb = cleaned_bytes / (1024 * 1024)
+            try:
+                import logging as _logging
+                _logger = _logging.getLogger(__name__)
+                _logger.info(f"🧹 [cf_mixer startup] Cleanup: {cleaned_count} anciens fichiers supprimés ({mb:.1f} MB libérés)")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+# Cleanup auto au démarrage du module (= démarrage du bot Railway)
+_startup_cleanup()
+
+
 # TikTok / Instagram Reels target dims
 TARGET_W = 1080
 TARGET_H = 1920
