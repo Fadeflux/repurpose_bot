@@ -515,32 +515,44 @@ def _has_model_role(member: "discord.Member", model_id: int) -> bool:
     
     Les admins (permissions.administrator) bypassent toujours.
     """
-    if not isinstance(member, discord.Member):
-        return False
-    # Admin bypass
     try:
-        if member.guild_permissions.administrator:
-            return True
-    except Exception:
-        pass
-    
-    # Mode 1 : matching par ID Discord (si configuré)
-    role_map = _get_model_role_id_map()
-    if role_map:
-        target_role_ids = set(role_map.get(int(model_id), []))
-        if target_role_ids:
-            for role in member.roles:
-                if role.id in target_role_ids:
-                    return True
+        if not isinstance(member, discord.Member):
+            logger.warning(f"[_has_model_role] member n'est pas Member: type={type(member).__name__}")
             return False
-        # Si model_id pas dans la map, fallback sur le nom
-    
-    # Mode 2 : matching par nom du rôle 'ID{X}'
-    target = f"id{int(model_id)}"
-    for role in member.roles:
-        if (role.name or "").strip().lower() == target:
-            return True
-    return False
+        # Admin bypass
+        try:
+            if member.guild_permissions.administrator:
+                return True
+        except Exception as e:
+            logger.warning(f"[_has_model_role] admin check failed: {e}")
+        
+        # Mode 1 : matching par ID Discord (si configuré)
+        role_map = _get_model_role_id_map()
+        if role_map:
+            target_role_ids = set(role_map.get(int(model_id), []))
+            member_role_ids = []
+            try:
+                member_role_ids = [r.id for r in member.roles]
+            except Exception as e:
+                logger.warning(f"[_has_model_role] member.roles failed: {e}")
+                return False
+            logger.info(f"[_has_model_role] member {member.id} model_id={model_id} member_roles={member_role_ids} target_roles={list(target_role_ids)}")
+            if target_role_ids:
+                for rid in member_role_ids:
+                    if rid in target_role_ids:
+                        return True
+                return False
+            # Si model_id pas dans la map, fallback sur le nom
+        
+        # Mode 2 : matching par nom du rôle 'ID{X}'
+        target = f"id{int(model_id)}"
+        for role in member.roles:
+            if (role.name or "").strip().lower() == target:
+                return True
+        return False
+    except Exception as e:
+        logger.error(f"[_has_model_role] CRASH: {e}", exc_info=True)
+        return False
 
 
 def _allowed_models_for_member(member: "discord.Member") -> List[int]:
@@ -551,39 +563,51 @@ def _allowed_models_for_member(member: "discord.Member") -> List[int]:
     1. Si DISCORD_MODEL_ROLE_IDS configuré, check par IDs Discord
     2. Sinon, fallback sur les noms 'ID{X}'
     """
-    if not isinstance(member, discord.Member):
-        return []
-    # Admin = tout
     try:
-        if member.guild_permissions.administrator:
-            return [m["id"] for m in cf_storage.list_models()]
-    except Exception:
-        pass
-    
-    out: List[int] = []
-    
-    # Mode 1 : matching par ID Discord
-    role_map = _get_model_role_id_map()
-    if role_map:
-        # Inverse la map : {role_id: model_id}
-        inverse: Dict[int, int] = {}
-        for mid, rids in role_map.items():
-            for rid in rids:
-                inverse[rid] = mid
+        if not isinstance(member, discord.Member):
+            logger.warning(f"[_allowed_models] member n'est pas Member: type={type(member).__name__}")
+            return []
+        # Admin = tout
+        try:
+            if member.guild_permissions.administrator:
+                return [m["id"] for m in cf_storage.list_models()]
+        except Exception as e:
+            logger.warning(f"[_allowed_models] admin check failed: {e}")
+        
+        out: List[int] = []
+        
+        # Mode 1 : matching par ID Discord
+        role_map = _get_model_role_id_map()
+        if role_map:
+            # Inverse la map : {role_id: model_id}
+            inverse: Dict[int, int] = {}
+            for mid, rids in role_map.items():
+                for rid in rids:
+                    inverse[rid] = mid
+            member_role_ids = []
+            try:
+                member_role_ids = [r.id for r in member.roles]
+            except Exception as e:
+                logger.warning(f"[_allowed_models] member.roles failed: {e}")
+                return []
+            for rid in member_role_ids:
+                if rid in inverse:
+                    mid = inverse[rid]
+                    if mid not in out:
+                        out.append(mid)
+            logger.info(f"[_allowed_models] member {member.id} member_roles={member_role_ids} → models={out}")
+            return out
+        
+        # Mode 2 : matching par nom du rôle 'ID{X}' (fallback)
+        import re as _re
         for role in member.roles:
-            if role.id in inverse:
-                mid = inverse[role.id]
-                if mid not in out:
-                    out.append(mid)
+            m = _re.match(r"^id(\d+)$", (role.name or "").strip().lower())
+            if m:
+                out.append(int(m.group(1)))
         return out
-    
-    # Mode 2 : matching par nom du rôle 'ID{X}' (fallback)
-    import re as _re
-    for role in member.roles:
-        m = _re.match(r"^id(\d+)$", (role.name or "").strip().lower())
-        if m:
-            out.append(int(m.group(1)))
-    return out
+    except Exception as e:
+        logger.error(f"[_allowed_models] CRASH: {e}", exc_info=True)
+        return []
 
 
 def install_clipfusion_commands(bot: "commands.Bot") -> None:
