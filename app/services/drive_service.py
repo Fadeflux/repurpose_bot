@@ -80,24 +80,42 @@ def get_drive_client():
             # On tombe en fallback Service Account
 
     # --- Tentative 2 : Service Account (fallback) ---
-    creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+    # Accepte 2 noms de variable d'environnement (GOOGLE_SERVICE_ACCOUNT_JSON est le plus utilisé)
+    creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or os.getenv("GOOGLE_CREDENTIALS_JSON")
     if not creds_json:
         logger.info("Aucune auth configurée (ni OAuth ni Service Account) : Drive désactivé.")
+        logger.info("  Variables checked: GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_CREDENTIALS_JSON, GOOGLE_OAUTH_TOKEN_JSON")
+        # Debug : liste les variables d'env qui matchent
+        google_vars = [k for k in os.environ.keys() if "GOOGLE" in k.upper()]
+        if google_vars:
+            logger.info(f"  Variables GOOGLE_* présentes : {google_vars}")
         return None
+
+    # Logging debug (sans révéler la clé privée)
+    json_len = len(creds_json)
+    json_preview = creds_json[:50].replace("\n", "\\n") + "..." if json_len > 50 else creds_json
+    logger.info(f"Service Account JSON trouvé : {json_len} caractères. Preview : {json_preview}")
 
     try:
         service_account, _, _, build, _, _ = _load_google_libs()
         creds_dict = json.loads(creds_json)
+        # Log l'email du service account pour confirmer
+        sa_email = creds_dict.get("client_email", "??")
+        logger.info(f"Service Account email : {sa_email}")
         creds = service_account.Credentials.from_service_account_info(
             creds_dict,
             scopes=["https://www.googleapis.com/auth/drive"],
         )
         _drive_client = build("drive", "v3", credentials=creds, cache_discovery=False)
         _auth_mode = "service_account"
-        logger.info("Drive client initialisé (mode Service Account - attention quota)")
+        logger.info(f"✅ Drive client initialisé (mode Service Account) - email: {sa_email}")
         return _drive_client
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ JSON invalide dans GOOGLE_SERVICE_ACCOUNT_JSON : {e}")
+        logger.error(f"   Position erreur : ligne {e.lineno}, colonne {e.colno}")
+        return None
     except Exception as e:
-        logger.error(f"Erreur Service Account: {type(e).__name__}: {e}")
+        logger.error(f"❌ Erreur Service Account: {type(e).__name__}: {e}")
         return None
 
 
@@ -143,33 +161,6 @@ def create_batch_folder(batch_name: str) -> Optional[str]:
         return folder["id"]
     except Exception as e:
         logger.error(f"Erreur création dossier Drive : {e}")
-        return None
-
-
-def create_subfolder(parent_folder_id: str, name: str) -> Optional[str]:
-    """
-    Crée un sous-dossier à l'intérieur d'un dossier Drive existant.
-    Utilisé pour organiser les batchs par fenêtre horaire (matin/soir/nuit).
-    Retourne l'ID du sous-dossier ou None si échec.
-    """
-    client = get_drive_client()
-    if not client or not parent_folder_id or not name:
-        return None
-    try:
-        metadata = {
-            "name": name,
-            "mimeType": "application/vnd.google-apps.folder",
-            "parents": [parent_folder_id],
-        }
-        folder = client.files().create(
-            body=metadata,
-            fields="id",
-            supportsAllDrives=True,
-        ).execute()
-        logger.info(f"Sous-dossier Drive créé : {name} (parent={parent_folder_id}) -> {folder['id']}")
-        return folder["id"]
-    except Exception as e:
-        logger.error(f"Erreur création sous-dossier Drive : {e}")
         return None
 
 
