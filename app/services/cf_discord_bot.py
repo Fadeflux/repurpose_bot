@@ -480,16 +480,17 @@ async def _say(req: CFRequest, content: str):
 # ============================================================================
 # INSTALLATION DU SLASH COMMAND SUR LE BOT EXISTANT
 # ============================================================================
-def _get_model_role_id_map() -> Dict[int, int]:
+def _get_model_role_id_map() -> Dict[int, List[int]]:
     """
-    Parse la variable DISCORD_MODEL_ROLE_IDS qui contient une map model_id → role_id.
-    Format attendu : '1:1234567890,2:9876543210,3:5555555555'
-    Retourne {model_id: role_id} si la var est configurée, sinon {}.
+    Parse la variable DISCORD_MODEL_ROLE_IDS qui contient une map model_id → [role_ids].
+    Format attendu : '1:1234567890,1:9876543210,2:5555555555,...'
+    Une même clé model_id peut apparaître plusieurs fois (1 par serveur Discord).
+    Retourne {model_id: [role_id1, role_id2, ...]} si la var est configurée, sinon {}.
     """
     raw = os.environ.get("DISCORD_MODEL_ROLE_IDS", "").strip()
     if not raw:
         return {}
-    result: Dict[int, int] = {}
+    result: Dict[int, List[int]] = {}
     for pair in raw.split(","):
         pair = pair.strip()
         if not pair or ":" not in pair:
@@ -498,7 +499,7 @@ def _get_model_role_id_map() -> Dict[int, int]:
             mid_str, rid_str = pair.split(":", 1)
             mid = int(mid_str.strip())
             rid = int(rid_str.strip())
-            result[mid] = rid
+            result.setdefault(mid, []).append(rid)
         except (ValueError, TypeError):
             continue
     return result
@@ -509,7 +510,7 @@ def _has_model_role(member: "discord.Member", model_id: int) -> bool:
     Check si le VA a le rôle Discord qui l'autorise à utiliser ce modèle.
     
     Priorité : 
-    1. Si DISCORD_MODEL_ROLE_IDS configuré (map model_id:role_id), check par ID Discord (robuste)
+    1. Si DISCORD_MODEL_ROLE_IDS configuré, check si le membre a UN des role_ids associés au modèle
     2. Sinon, fallback sur le nom du rôle 'ID{X}' (insensible à la casse)
     
     Les admins (permissions.administrator) bypassent toujours.
@@ -526,10 +527,10 @@ def _has_model_role(member: "discord.Member", model_id: int) -> bool:
     # Mode 1 : matching par ID Discord (si configuré)
     role_map = _get_model_role_id_map()
     if role_map:
-        target_role_id = role_map.get(int(model_id))
-        if target_role_id:
+        target_role_ids = set(role_map.get(int(model_id), []))
+        if target_role_ids:
             for role in member.roles:
-                if role.id == target_role_id:
+                if role.id in target_role_ids:
                     return True
             return False
         # Si model_id pas dans la map, fallback sur le nom
@@ -565,10 +566,15 @@ def _allowed_models_for_member(member: "discord.Member") -> List[int]:
     role_map = _get_model_role_id_map()
     if role_map:
         # Inverse la map : {role_id: model_id}
-        inverse = {rid: mid for mid, rid in role_map.items()}
+        inverse: Dict[int, int] = {}
+        for mid, rids in role_map.items():
+            for rid in rids:
+                inverse[rid] = mid
         for role in member.roles:
             if role.id in inverse:
-                out.append(inverse[role.id])
+                mid = inverse[role.id]
+                if mid not in out:
+                    out.append(mid)
         return out
     
     # Mode 2 : matching par nom du rôle 'ID{X}' (fallback)
