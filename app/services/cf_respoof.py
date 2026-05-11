@@ -50,6 +50,26 @@ def _get_iphone_model_from_device_choice(device_choice: str) -> str:
     return metadata_randomizer._IPHONE_MAP.get(device_choice, "iPhone 16 Pro Max")
 
 
+def _get_latest_ios_for_model(model_name: str) -> str:
+    """
+    Retourne la DERNIÈRE version iOS disponible pour ce modèle iPhone.
+    Force la cohérence : un compte locké sur iPhone 17 Pro Max devra
+    toujours avoir la dernière iOS dispo (ex: 26.4.1).
+    """
+    for m, ios_versions in metadata_randomizer.IPHONE_MODELS:
+        if m == model_name:
+            return ios_versions[-1]  # Dernière version de la liste
+    return "26.4.1"  # Fallback
+
+
+def _force_latest_ios_in_metadata(meta: Dict[str, str], model_name: str) -> Dict[str, str]:
+    """Override l'iOS random par la dernière disponible pour ce device."""
+    latest_ios = _get_latest_ios_for_model(model_name)
+    meta = dict(meta)
+    meta["com.apple.quicktime.software"] = latest_ios
+    return meta
+
+
 def _override_metadata_with_account_gps(
     meta: Dict[str, str],
     gps_lat: float,
@@ -82,6 +102,7 @@ def respoof_photo(
 
     model_name = _get_iphone_model_from_device_choice(device_choice)
     spoof_meta = metadata_randomizer._iphone_metadata_fixed(model_name)
+    spoof_meta = _force_latest_ios_in_metadata(spoof_meta, model_name)
     ios_version = spoof_meta.get("com.apple.quicktime.software", "26.4")
 
     creation_time_iso = spoof_meta.get("creation_time", "")
@@ -136,6 +157,7 @@ def respoof_video(
 
     model_name = _get_iphone_model_from_device_choice(device_choice)
     spoof_meta = metadata_randomizer._iphone_metadata_fixed(model_name)
+    spoof_meta = _force_latest_ios_in_metadata(spoof_meta, model_name)
     ios_version = spoof_meta.get("com.apple.quicktime.software", "26.4")
 
     spoof_meta = _override_metadata_with_account_gps(spoof_meta, gps_lat, gps_lng, gps_alt)
