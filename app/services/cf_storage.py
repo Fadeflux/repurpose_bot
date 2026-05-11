@@ -1120,6 +1120,32 @@ def find_account(username: str, model_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
+def find_account_any_model(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Cherche un compte par username uniquement (sans filtrer par modèle).
+    Si plusieurs comptes avec le même username sur différents modèles (rare),
+    retourne le premier trouvé (le plus récent).
+    Utilisé par /respoof qui ne demande plus le modèle au VA.
+    """
+    if not is_db_enabled() or not username:
+        return None
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, username, model_id, va_discord_id, va_name, "
+                    "device_choice, gps_lat, gps_lng, gps_city, created_at, ios_version, ios_set_at "
+                    "FROM cf_accounts WHERE username = %s "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (username.strip(),),
+                )
+                row = cur.fetchone()
+        return _row_to_account(row) if row else None
+    except Exception as e:
+        logger.error(f"find_account_any_model failed: {e}")
+        return None
+
+
 def create_account(
     username: str,
     model_id: int,
