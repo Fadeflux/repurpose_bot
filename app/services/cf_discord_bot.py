@@ -27,7 +27,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 try:
     import discord
@@ -480,10 +480,38 @@ async def _say(req: CFRequest, content: str):
 # ============================================================================
 # INSTALLATION DU SLASH COMMAND SUR LE BOT EXISTANT
 # ============================================================================
+def _get_model_role_id_map() -> Dict[int, int]:
+    """
+    Parse la variable DISCORD_MODEL_ROLE_IDS qui contient une map model_id → role_id.
+    Format attendu : '1:1234567890,2:9876543210,3:5555555555'
+    Retourne {model_id: role_id} si la var est configurée, sinon {}.
+    """
+    raw = os.environ.get("DISCORD_MODEL_ROLE_IDS", "").strip()
+    if not raw:
+        return {}
+    result: Dict[int, int] = {}
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if not pair or ":" not in pair:
+            continue
+        try:
+            mid_str, rid_str = pair.split(":", 1)
+            mid = int(mid_str.strip())
+            rid = int(rid_str.strip())
+            result[mid] = rid
+        except (ValueError, TypeError):
+            continue
+    return result
+
+
 def _has_model_role(member: "discord.Member", model_id: int) -> bool:
     """
-    Check si le VA a le rôle Discord 'ID{X}' qui l'autorise à utiliser ce modèle.
-    Match insensible à la casse : 'ID1', 'id1', 'Id1' tous OK.
+    Check si le VA a le rôle Discord qui l'autorise à utiliser ce modèle.
+    
+    Priorité : 
+    1. Si DISCORD_MODEL_ROLE_IDS configuré (map model_id:role_id), check par ID Discord (robuste)
+    2. Sinon, fallback sur le nom du rôle 'ID{X}' (insensible à la casse)
+    
     Les admins (permissions.administrator) bypassent toujours.
     """
     if not isinstance(member, discord.Member):
@@ -494,6 +522,19 @@ def _has_model_role(member: "discord.Member", model_id: int) -> bool:
             return True
     except Exception:
         pass
+    
+    # Mode 1 : matching par ID Discord (si configuré)
+    role_map = _get_model_role_id_map()
+    if role_map:
+        target_role_id = role_map.get(int(model_id))
+        if target_role_id:
+            for role in member.roles:
+                if role.id == target_role_id:
+                    return True
+            return False
+        # Si model_id pas dans la map, fallback sur le nom
+    
+    # Mode 2 : matching par nom du rôle 'ID{X}'
     target = f"id{int(model_id)}"
     for role in member.roles:
         if (role.name or "").strip().lower() == target:
@@ -502,7 +543,13 @@ def _has_model_role(member: "discord.Member", model_id: int) -> bool:
 
 
 def _allowed_models_for_member(member: "discord.Member") -> List[int]:
-    """Liste des IDs de modèles auxquels le membre a accès via ses rôles."""
+    """
+    Liste des IDs de modèles auxquels le membre a accès via ses rôles.
+    
+    Priorité :
+    1. Si DISCORD_MODEL_ROLE_IDS configuré, check par IDs Discord
+    2. Sinon, fallback sur les noms 'ID{X}'
+    """
     if not isinstance(member, discord.Member):
         return []
     # Admin = tout
@@ -511,7 +558,20 @@ def _allowed_models_for_member(member: "discord.Member") -> List[int]:
             return [m["id"] for m in cf_storage.list_models()]
     except Exception:
         pass
+    
     out: List[int] = []
+    
+    # Mode 1 : matching par ID Discord
+    role_map = _get_model_role_id_map()
+    if role_map:
+        # Inverse la map : {role_id: model_id}
+        inverse = {rid: mid for mid, rid in role_map.items()}
+        for role in member.roles:
+            if role.id in inverse:
+                out.append(inverse[role.id])
+        return out
+    
+    # Mode 2 : matching par nom du rôle 'ID{X}' (fallback)
     import re as _re
     for role in member.roles:
         m = _re.match(r"^id(\d+)$", (role.name or "").strip().lower())
