@@ -1167,7 +1167,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             # Mime type selon le type de fichier
             mime = "image/jpeg" if file_type == "photo" else "video/mp4"
             up = drive_service.upload_file(
-                local_path=str(tmp_out),
+                local_path=tmp_out,
                 folder_id=folder_id,
                 mime_type=mime,
             )
