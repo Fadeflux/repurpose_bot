@@ -1232,9 +1232,19 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         if folder_url:
             ack += f"\n🔗 [Lien Drive]({folder_url})"
 
-        await interaction.followup.send(ack, ephemeral=False)
+        # Message canal qui s'auto-supprime après TTL (CF_CHANNEL_MSG_TTL = 30s par défaut)
+        channel_msg = await interaction.followup.send(ack, ephemeral=False)
+        ttl = _channel_msg_ttl()
+        if ttl > 0 and channel_msg:
+            async def _auto_delete_respoof():
+                try:
+                    await asyncio.sleep(ttl)
+                    await channel_msg.delete()
+                except Exception:
+                    pass
+            asyncio.create_task(_auto_delete_respoof())
 
-        # DM au VA
+        # DM au VA (jamais supprimé)
         try:
             dm = await interaction.user.create_dm()
             await dm.send(ack)
