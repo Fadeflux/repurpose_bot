@@ -984,6 +984,28 @@ def delete_model(model_id: int) -> bool:
         return False
 
 
+def rename_model(model_id: int, new_label: str) -> bool:
+    """Renomme un modèle existant. Retourne True si modifié."""
+    if not is_db_enabled() or not model_id:
+        return False
+    clean = (new_label or "").strip()
+    if not clean:
+        return False
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE cf_models SET label = %s WHERE id = %s",
+                    (clean, int(model_id)),
+                )
+                updated = cur.rowcount > 0
+            conn.commit()
+        return updated
+    except Exception as e:
+        logger.error(f"rename_model failed: {e}")
+        return False
+
+
 def get_model(model_id: int) -> Optional[Dict[str, Any]]:
     if not is_db_enabled() or not model_id:
         return None
