@@ -662,7 +662,9 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             )
             return
 
-        existing = cf_storage.find_account(clean_username, modele)
+        # Cherche le compte par username SEUL (sans filtrer par model_id)
+        # comme ça le même compte garde son device/GPS même si plusieurs modèles l'utilisent
+        existing = cf_storage.find_account_any_model(clean_username)
         user_id_str = str(interaction.user.id)
 
         if existing:
