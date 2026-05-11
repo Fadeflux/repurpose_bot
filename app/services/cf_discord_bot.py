@@ -978,9 +978,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             )
             return
 
-        # 2. Validation compte + résolution auto du modèle
-        # - Si compte existe → on prend son modele_id (peu importe le rôle)
-        # - Si compte n'existe pas → on prend le 1er rôle ID{X} du VA pour créer
+        # 2. Validation compte
         clean_username = compte.strip().lstrip("@").strip()
         if not clean_username:
             await interaction.response.send_message(
@@ -989,16 +987,16 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             )
             return
 
+        # 3. DEFER IMMÉDIATEMENT pour éviter le timeout Discord (3s max sans defer)
+        # On a max 15 minutes après le defer pour répondre via followup.
+        await interaction.response.defer(ephemeral=False, thinking=True)
+
+        # 4. Résolution du compte + modèle
+        # - Si compte existe → on reprend son model_id
+        # - Si compte n'existe pas → on prend le 1er rôle ID{X} du VA pour créer
         is_admin_user = _is_admin(interaction.user)
         user_id_str = str(interaction.user.id)
-
-        # Cherche le compte sans filtre de modèle (on prendra celui qui existe déjà)
-        existing = None
-        for m in cf_storage.list_models():
-            candidate = cf_storage.find_account(clean_username, m["id"])
-            if candidate:
-                existing = candidate
-                break
+        existing = cf_storage.find_account_any_model(clean_username)
 
         is_new_account = False
         modele = None
@@ -1008,7 +1006,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             owner_id = str(existing.get("va_discord_id", "") or "")
             if owner_id and owner_id != user_id_str and not is_admin_user:
                 owner_name = existing.get("va_name", "un autre VA")
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"❌ Le compte **@{clean_username}** appartient déjà à **{owner_name}**.",
                     ephemeral=True,
                 )
@@ -1019,11 +1017,10 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             # Nouveau compte : déduit le modèle depuis les rôles ID{X} du VA
             allowed_ids = _allowed_models_for_member(interaction.user)
             if not allowed_ids:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"❌ Tu n'as aucun rôle `ID{{N}}` sur ce serveur, donc impossible de créer "
                     f"le compte **@{clean_username}**.\n"
-                    f"Demande à un admin de t'attribuer un rôle `ID1`, `ID2`, etc. selon le(s) modèle(s) "
-                    f"sur lesquels tu travailles.",
+                    f"Demande à un admin de t'attribuer un rôle `ID1`, `ID2`, etc.",
                     ephemeral=True,
                 )
                 return
@@ -1037,7 +1034,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 va_name=interaction.user.display_name or interaction.user.name,
             )
             if not account_data:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"❌ Impossible de créer le compte @{clean_username}.",
                     ephemeral=True,
                 )
@@ -1055,7 +1052,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                     days=period_days,
                 )
                 if used + 1 > max_v:
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         f"⛔ Quota dépassé : {used}/{max_v} vidéos sur {period_days}j.",
                         ephemeral=True,
                     )
@@ -1080,17 +1077,14 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                         h = int(wait.total_seconds() // 3600)
                         m = int((wait.total_seconds() % 3600) // 60)
                         wait_str = f"{h}h{m:02d}" if h > 0 else f"{m} min"
-                        await interaction.response.send_message(
+                        await interaction.followup.send(
                             f"⏰ Intervalle min non respecté pour @{account_data['username']}.\n"
                             f"Reviens dans **{wait_str}**.",
                             ephemeral=True,
                         )
                         return
 
-        # 6. Defer (le download + spoof + upload prend quelques secondes)
-        await interaction.response.defer(ephemeral=False, thinking=True)
-
-        # 7. Download du fichier depuis Discord
+        # 6. Download du fichier depuis Discord (déjà déféré plus haut)
         try:
             file_bytes = await fichier.read()
         except Exception as e:
