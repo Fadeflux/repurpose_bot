@@ -2256,7 +2256,7 @@ function renderContentModelSelect() {
     state.models.forEach(m => {
         const opt = document.createElement('option');
         opt.value = String(m.id);
-        opt.textContent = `ID ${m.id} — ${m.label}`;
+        opt.textContent = m.label;
         sel.appendChild(opt);
     });
     if (current && state.models.some(m => String(m.id) === String(current))) {
@@ -2295,7 +2295,7 @@ function updateUploadGuard() {
         } else {
             const m = state.models.find(x => String(x.id) === String(state.contentModelId));
             hint.textContent = m
-                ? `Les vidéos uploadées seront associées à : ID ${m.id} — ${m.label}`
+                ? `Les vidéos uploadées seront associées à : ${m.label}`
                 : '';
             hint.style.color = '';
         }
@@ -2353,7 +2353,7 @@ async function renderCategoryFilterPills() {
         const isActive = String(state.contentFilterModelId) === String(m.id);
         pills.push(`
             <button class="category-filter-pill ${isActive ? 'active' : ''}" data-filter="${m.id}">
-                ID ${m.id} — ${escapeHtml(m.label)} <span class="pill-count">${count}</span>
+                ${escapeHtml(m.label)} <span class="pill-count">${count}</span>
             </button>
         `);
     });
