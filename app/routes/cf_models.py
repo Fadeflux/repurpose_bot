@@ -1,9 +1,10 @@
 """
 ClipFusion — Gestion des modèles (créatrices).
 Endpoints :
-  - GET  /api/clipfusion/models           : liste
-  - POST /api/clipfusion/models           : créer
-  - DELETE /api/clipfusion/models/{id}    : supprimer
+  - GET    /api/clipfusion/models           : liste
+  - POST   /api/clipfusion/models           : créer
+  - PATCH  /api/clipfusion/models/{id}      : renommer
+  - DELETE /api/clipfusion/models/{id}      : supprimer
 """
 from typing import Any, Dict
 
@@ -34,6 +35,18 @@ async def create_model(label: str = Form("")) -> Dict[str, Any]:
     if not model:
         raise HTTPException(500, "Création échouée (DATABASE_URL ?)")
     return {"ok": True, "model": model}
+
+
+@router.patch("/{model_id}")
+async def rename_model(model_id: int, label: str = Form(...)) -> Dict[str, Any]:
+    """Renomme un modèle existant (change son label)."""
+    clean = (label or "").strip()
+    if not clean:
+        raise HTTPException(400, "Le nouveau nom ne peut pas être vide")
+    ok = cf_storage.rename_model(model_id, clean)
+    if not ok:
+        raise HTTPException(404, "Modèle introuvable")
+    return {"ok": True, "label": clean}
 
 
 @router.delete("/{model_id}")
