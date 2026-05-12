@@ -667,6 +667,28 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             await interaction.response.send_message(msg, ephemeral=True)
             return
 
+        # 2.5. CHECK EMAIL VA (obligatoire pour pouvoir partager le Drive)
+        # Les admins sont bypass (ils ont déjà accès au Drive complet)
+        if not _is_admin(interaction.user):
+            user_id_for_check = str(interaction.user.id)
+            try:
+                from app.services import va_emails_db as _veb_req
+                all_emails_req = _veb_req.load_all_emails() or {}
+                va_email_req = all_emails_req.get(user_id_for_check, "") or ""
+            except Exception:
+                va_email_req = ""
+
+            if not va_email_req:
+                await interaction.response.send_message(
+                    "❌ **Tu n'as pas encore enregistré ton email.**\n\n"
+                    "Pour utiliser `/request`, tu dois d'abord poster ton adresse Gmail "
+                    "dans le canal **#email-drive**.\n\n"
+                    "Une fois ton email enregistré, ton drive te sera automatiquement "
+                    "partagé sur cette adresse. 📧",
+                    ephemeral=True,
+                )
+                return
+
         # 3. Validation quantité
         max_q = _max_videos_per_request()
         if quantite < 1:
@@ -1088,6 +1110,29 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 ephemeral=True,
             )
             return
+
+        # 2.5. CHECK EMAIL VA (obligatoire pour pouvoir partager le Drive)
+        # Les admins sont bypass (ils ont déjà accès au Drive complet)
+        is_admin_check = _is_admin(interaction.user)
+        if not is_admin_check:
+            user_id_for_check = str(interaction.user.id)
+            try:
+                from app.services import va_emails_db
+                all_emails = va_emails_db.load_all_emails() or {}
+                va_email_check = all_emails.get(user_id_for_check, "") or ""
+            except Exception:
+                va_email_check = ""
+
+            if not va_email_check:
+                await interaction.response.send_message(
+                    "❌ **Tu n'as pas encore enregistré ton email.**\n\n"
+                    "Pour utiliser `/respoof`, tu dois d'abord poster ton adresse Gmail "
+                    "dans le canal **#email-drive**.\n\n"
+                    "Une fois ton email enregistré, ton drive te sera automatiquement "
+                    "partagé sur cette adresse. 📧",
+                    ephemeral=True,
+                )
+                return
 
         # 3. DEFER IMMÉDIATEMENT pour éviter le timeout Discord (3s max sans defer)
         # On a max 15 minutes après le defer pour répondre via followup.
