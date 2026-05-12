@@ -567,18 +567,52 @@ async def notify_va_drive_ready(discord_id: str, folder_url: str = "") -> bool:
 # Démarrage du bot en arrière-plan
 # =============================================================================
 async def _run_bot():
-    """Lance le bot en boucle (reconnexion auto en cas de déco)."""
+    """
+    Lance le bot avec auto-reconnect ROBUSTE.
+    Si le bot crash ou perd la connexion Gateway, il redémarre automatiquement
+    avec backoff exponentiel (5s, 10s, 20s, max 60s entre tentatives).
+    """
     global _bot
     token = _get_bot_token()
     if not token:
         logger.warning("Bot Discord non démarré (token manquant)")
         return
 
-    _bot = _build_bot()
-    try:
-        await _bot.start(token)
-    except Exception as e:
-        logger.exception(f"Bot Discord crashed: {e}")
+    backoff = 5  # secondes d'attente entre reconnexions
+    max_backoff = 60
+    consecutive_failures = 0
+
+    while True:
+        try:
+            # Recrée le bot à chaque tentative (cleanup propre)
+            _bot = _build_bot()
+            logger.info(f"🚀 Bot Discord démarrage (tentative #{consecutive_failures + 1})")
+            await _bot.start(token)
+            # Si on arrive ici sans exception, c'est qu'on a stop proprement (rare)
+            logger.info("Bot Discord arrêté proprement (sortie de la boucle)")
+            break
+        except Exception as e:
+            consecutive_failures += 1
+            logger.exception(
+                f"⚠️ Bot Discord crashed (tentative #{consecutive_failures}): {e}. "
+                f"Reconnexion dans {backoff}s..."
+            )
+            # Reset le _bot pour évit de garder une instance morte
+            try:
+                if _bot:
+                    await _bot.close()
+            except Exception:
+                pass
+            _bot = None
+            # Attend avec backoff exponentiel avant retry
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff)
+            # Si 10 échecs consécutifs, log alerte critique
+            if consecutive_failures % 10 == 0:
+                logger.error(
+                    f"🚨 ALERT: {consecutive_failures} échecs consécutifs du bot Discord. "
+                    "Vérifie le token et les permissions."
+                )
 
 
 def start_discord_bot():

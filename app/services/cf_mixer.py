@@ -10,6 +10,8 @@ import os
 import shlex
 import random
 import time
+import gc
+import threading
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Generator
 
@@ -61,6 +63,21 @@ def _startup_cleanup() -> None:
 
 # Cleanup auto au démarrage du module (= démarrage du bot Railway)
 _startup_cleanup()
+
+
+# ===== CONCURRENCE LOCK =====
+# Limite à 1 SEUL mix en parallèle (évite OOM kill quand 2+ VAs lancent /request ensemble).
+# Les autres mix attendent leur tour dans la queue.
+_MIX_LOCK = threading.Semaphore(1)
+
+
+def _release_memory() -> None:
+    """Force le garbage collector à libérer la RAM (utile après gros mix)."""
+    try:
+        gc.collect()
+        gc.collect()  # 2e passe pour les objets cycliques
+    except Exception:
+        pass
 
 
 # TikTok / Instagram Reels target dims
@@ -714,6 +731,15 @@ def mix_batch_stream(
         yield {"type": "done", "outputs": [], "total_elapsed": 0}
         return
 
+    # ===== QUEUE : 1 SEUL MIX À LA FOIS (évite OOM kill) =====
+    # Si un autre mix est en cours, on attend qu'il finisse avant de commencer.
+    waiting_for_lock = not _MIX_LOCK.acquire(blocking=False)
+    if waiting_for_lock:
+        yield {"type": "log", "level": "INFO",
+               "message": "⏳ Un autre mix est en cours, attente de mon tour..."}
+        _MIX_LOCK.acquire(blocking=True)  # Bloque jusqu'à libération
+        yield {"type": "log", "level": "INFO", "message": "✅ Tour arrivé, lancement du mix"}
+
     try:
         v = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=5)
         engine_line = v.stdout.splitlines()[0][:60] if v.stdout else "ffmpeg"
@@ -1250,3 +1276,15 @@ def mix_batch_stream(
         logger.warning(f"Save batch history échoué: {e}")
 
     yield {"type": "done", "outputs": output_metas, "total_elapsed": round(total_elapsed, 2), "drive": drive_info}
+
+    # ===== CLEANUP MÉMOIRE (évite OOM kill au fil des batchs) =====
+    try:
+        _release_memory()
+    except Exception:
+        pass
+
+    # ===== LIBÈRE LA QUEUE pour le prochain mix =====
+    try:
+        _MIX_LOCK.release()
+    except Exception:
+        pass
