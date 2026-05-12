@@ -116,7 +116,16 @@ def _cleanup(paths: List[str]):
 
 
 def has_caption_overlay(path: str) -> bool:
-    """OCR a few frames; if substantial text is detected on >= 2 frames, return True."""
+    """OCR a few frames; if substantial text is detected on >= 2 frames, return True.
+    
+    PROTECTION : par défaut, retourne False sans faire d'OCR (économie de coût).
+    L'OCR a l'upload était la source des 12$/jour de consommation API.
+    Pour réactiver l'OCR à l'upload : set ENABLE_UPLOAD_OCR=true sur Railway.
+    """
+    # Désactivé par défaut - évite la consommation API massive à chaque upload
+    if os.environ.get("ENABLE_UPLOAD_OCR", "false").lower() != "true":
+        return False
+    
     frames = _extract_frames_to_tmp(path, count=3)
     if not frames:
         return False
