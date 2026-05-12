@@ -82,6 +82,13 @@ async def update_video_model(vid_id: str, model_id: Optional[int] = Form(None)):
 
 @router.delete("/{vid_id}")
 async def delete_video(vid_id: str):
+    # PROTECTION : log chaque suppression individuelle
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"🗑️ [cf_content] DELETE single video: id={vid_id}")
+    except Exception:
+        pass
     ok = storage.delete_video(vid_id)
     if not ok:
         raise HTTPException(404, "Video not found")
@@ -89,18 +96,37 @@ async def delete_video(vid_id: str):
 
 
 @router.delete("/")
-async def clear_videos():
+async def clear_videos(confirm: str = Query("")):
+    """
+    Supprime TOUTES les vidéos. PROTECTION : nécessite ?confirm=YES_DELETE_ALL
+    """
+    if confirm != "YES_DELETE_ALL":
+        raise HTTPException(
+            400,
+            "Protection anti-suppression accidentelle. Pour confirmer, ajoute ?confirm=YES_DELETE_ALL à l'URL."
+        )
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning("🗑️ [cf_content] CLEAR ALL videos confirmed")
+    except Exception:
+        pass
     count = storage.clear_videos()
     return {"ok": True, "deleted": count}
 
 
 @router.post("/cleanup-orphans")
-async def cleanup_orphans(dry_run: bool = Query(False)):
+async def cleanup_orphans(dry_run: bool = Query(True)):
     """
-    Supprime les entrées DB qui pointent vers un fichier disque inexistant.
-    Utile après migration vers volume persistant : les anciennes entrées /tmp
-    pointent vers des fichiers qui n'existent plus.
-    Body: ?dry_run=true pour juste compter sans supprimer.
+    Liste les entrées DB qui pointent vers un fichier disque inexistant.
+    
+    PROTECTION : par défaut dry_run=True (juste lister, pas supprimer).
+    Pour vraiment supprimer, il faut explicitement passer ?dry_run=false
+    ET la suppression sera loggée.
+    
+    Utile uniquement après migration vers volume persistant.
+    Évite de l'utiliser sans raison précise — peut supprimer toutes tes vidéos
+    si le volume est temporairement détaché.
     """
     videos = storage.list_videos()
     orphans: List[str] = []
@@ -111,6 +137,16 @@ async def cleanup_orphans(dry_run: bool = Query(False)):
 
     deleted = 0
     if not dry_run and orphans:
+        # Log avant suppression pour audit
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"🗑️ [cf_content] CLEANUP-ORPHANS deleting {len(orphans)} videos. "
+                f"IDs (first 10): {orphans[:10]}"
+            )
+        except Exception:
+            pass
         deleted = storage.delete_videos_bulk(orphans)
 
     return {
@@ -118,19 +154,26 @@ async def cleanup_orphans(dry_run: bool = Query(False)):
         "orphans_found": len(orphans),
         "deleted": deleted,
         "dry_run": dry_run,
+        "warning": "dry_run=true par défaut. Passe ?dry_run=false pour vraiment supprimer." if dry_run else None,
     }
 
 
 @router.post("/filter")
 async def filter_videos(payload: Dict[str, Any] = Body(default={})):
     """
-    Applique les filtres auto sur toutes les vidéos uploadées.
-    Body: { filter_horizontal, filter_talking, filter_captions, dry_run }
+    Analyse les vidéos selon des critères (horizontal, talking, captions).
+    
+    PROTECTION : par défaut dry_run=True (juste analyser, ne pas supprimer).
+    Le filter captions est désactivé par défaut (puisque tu veux GARDER les
+    vidéos avec captions pour les traiter, pas les supprimer).
+    
+    Pour vraiment supprimer : payload = {dry_run: false}
     """
-    flag_h = bool(payload.get("filter_horizontal", True))
-    flag_t = bool(payload.get("filter_talking", True))
-    flag_c = bool(payload.get("filter_captions", True))
-    dry_run = bool(payload.get("dry_run", False))
+    # PROTECTION : tous les filtres OFF par défaut, dry_run ON par défaut
+    flag_h = bool(payload.get("filter_horizontal", False))
+    flag_t = bool(payload.get("filter_talking", False))
+    flag_c = bool(payload.get("filter_captions", False))
+    dry_run = bool(payload.get("dry_run", True))  # défaut: TRUE (juste analyser)
 
     videos = storage.list_videos()
     if not videos:
@@ -168,6 +211,16 @@ async def filter_videos(payload: Dict[str, Any] = Body(default={})):
 
     deleted_ids: List[str] = []
     if not dry_run and to_delete:
+        # Log avant suppression pour audit
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"🗑️ [cf_content] FILTER deleting {len(to_delete)} videos. "
+                f"flags: h={flag_h} t={flag_t} c={flag_c}"
+            )
+        except Exception:
+            pass
         deleted_count = storage.delete_videos_bulk(to_delete)
         deleted_ids = to_delete[:deleted_count]
 
