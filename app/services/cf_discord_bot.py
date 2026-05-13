@@ -704,17 +704,25 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             )
             return
 
-        # 4. Validation modèle
-        model = cf_storage.get_model(modele)
+        # 4. Validation modèle — LOOKUP PAR LABEL (pas par DB id)
+        # Les VAs voient des labels "ID1", "ID8" etc. sur le site. Les IDs DB
+        # peuvent être décalés (suppressions = trous dans l'auto-increment), donc
+        # on cherche le modèle dont le label contient le numéro tapé, pas l'id DB.
+        model = cf_storage.get_model_by_label_number(modele)
         if not model:
             available = cf_storage.list_models()
             if available:
-                lst = ", ".join(f"`{m['id']}` ({m['label']})" for m in available[:20])
-                msg = f"❌ Modèle ID **{modele}** introuvable.\nDispos : {lst}"
+                lst = ", ".join(f"`{m['label']}`" for m in available[:20])
+                msg = f"❌ Modèle **ID{modele}** introuvable.\nDispos : {lst}"
             else:
-                msg = f"❌ Modèle ID **{modele}** introuvable.\nAucun modèle créé pour l'instant. Demande à l'admin."
+                msg = f"❌ Modèle **ID{modele}** introuvable.\nAucun modèle créé pour l'instant. Demande à l'admin."
             await interaction.response.send_message(msg, ephemeral=True)
             return
+
+        # À partir d'ici, on remplace `modele` (numéro VA) par le VRAI DB id.
+        # Comme ça toutes les lookups downstream (vidéos, comptes, request)
+        # tapent dans la bonne entrée DB, peu importe le décalage label↔id.
+        modele = int(model["id"])
 
         # 4b. RATE LIMIT (anti-abus) — bypass admin
         va_name_for_check = interaction.user.display_name or interaction.user.name
@@ -983,7 +991,11 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             accounts = cf_storage.list_accounts(va_discord_id=user_id_str)
             if modele_value:
                 try:
-                    mid = int(modele_value)
+                    # Résout le numéro tapé (VA voit le label sur le site) vers le
+                    # VRAI DB id du modèle, comme dans la commande principale.
+                    typed_n = int(modele_value)
+                    resolved = cf_storage.get_model_by_label_number(typed_n)
+                    mid = int(resolved["id"]) if resolved else typed_n
                     accounts = [a for a in accounts if int(a.get("model_id", 0)) == mid]
                 except (ValueError, TypeError):
                     pass
@@ -1172,7 +1184,12 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 )
                 return
             # On prend le PLUS PETIT id (souvent le rôle principal du VA)
-            modele = min(allowed_ids)
+            # Le numéro vient du nom du rôle Discord ("IDX") → c'est un numéro
+            # user-facing, pas un DB id. On le résout vers le vrai DB id via label,
+            # comme dans /request, pour pas créer le compte sous un id décalé.
+            typed_n = min(allowed_ids)
+            _resolved = cf_storage.get_model_by_label_number(typed_n)
+            modele = int(_resolved["id"]) if _resolved else typed_n
             is_new_account = True
             account_data = cf_storage.create_account(
                 username=clean_username,

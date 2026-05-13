@@ -1029,6 +1029,53 @@ def get_model(model_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_model_by_label_number(n: int) -> Optional[Dict[str, Any]]:
+    """
+    Trouve un modèle par le NUMÉRO contenu dans son label (pas par son DB id).
+
+    Le site affiche aux VAs des labels du type "ID1", "ID8", "Modele 4", etc.
+    Mais les IDs DB peuvent être décalés (suppressions = trous dans l'auto-increment),
+    donc /request modele:8 ne doit PAS chercher l'id DB 8, mais le modèle dont
+    le label contient 8 (ce que voit le VA sur le site).
+
+    Patterns acceptés (exact match prioritaire) :
+      "Modele 8", "Modèle 8", "ID8", "ID 8", "id8", "8"
+    Fallback : tout label contenant 8 comme nombre isolé (word boundary).
+
+    Retourne le 1er match ou None.
+    """
+    if not is_db_enabled() or not n:
+        return None
+    try:
+        models = list_models()
+    except Exception:
+        return None
+    if not models:
+        return None
+
+    n_str = str(int(n))
+    exact_patterns = {
+        f"Modele {n_str}", f"Modèle {n_str}",
+        f"modele {n_str}", f"modèle {n_str}",
+        f"ID{n_str}", f"ID {n_str}",
+        f"id{n_str}", f"id {n_str}",
+        n_str,
+    }
+    for m in models:
+        label = (m.get("label") or "").strip()
+        if label in exact_patterns:
+            return m
+
+    import re as _re
+    pattern = _re.compile(rf"\b{n_str}\b")
+    for m in models:
+        label = (m.get("label") or "").strip()
+        if pattern.search(label):
+            return m
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # COMPTES INSTAGRAM (cf_accounts)
 # Chaque compte = 1 device locked + 1 GPS locked + 1 modèle associé
