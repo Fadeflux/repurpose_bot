@@ -32,6 +32,141 @@ logger = get_logger("routes")
 
 
 # ---------------------------------------------------------------------------
+# CLEANUP DISQUE : empêche le filesystem container Railway de saturer.
+# Le filesystem du container est limité (~5-10 GB), on ne peut PAS y stocker
+# durablement des outputs vidéo. Les fichiers traînants viennent de :
+# - Crashes pendant l'upload Drive
+# - Drive upload qui retourne None silencieusement
+# - Anciens batchs avant que le cleanup post-upload existe
+# ---------------------------------------------------------------------------
+def _startup_cleanup_outputs() -> None:
+    """Vide OUTPUT_DIR au démarrage. Tout ce qui traîne est forcément orphelin."""
+    try:
+        if not OUTPUT_DIR.exists():
+            return
+        count = 0
+        total_bytes = 0
+        for f in OUTPUT_DIR.iterdir():
+            if not f.is_file():
+                continue
+            try:
+                total_bytes += f.stat().st_size
+                f.unlink()
+                count += 1
+            except Exception:
+                pass
+        if count > 0:
+            logger.info(
+                f"🧹 [video startup] Cleanup OUTPUT_DIR: {count} fichiers "
+                f"({total_bytes / (1024*1024):.1f} MB libérés)"
+            )
+    except Exception as e:
+        logger.warning(f"Startup cleanup failed: {e}")
+
+
+def _startup_cleanup_uploads() -> None:
+    """Vide UPLOAD_DIR au démarrage (vidéos sources orphelines)."""
+    try:
+        if not UPLOAD_DIR.exists():
+            return
+        count = 0
+        total_bytes = 0
+        for f in UPLOAD_DIR.iterdir():
+            if not f.is_file():
+                continue
+            try:
+                total_bytes += f.stat().st_size
+                f.unlink()
+                count += 1
+            except Exception:
+                pass
+        if count > 0:
+            logger.info(
+                f"🧹 [video startup] Cleanup UPLOAD_DIR: {count} fichiers "
+                f"({total_bytes / (1024*1024):.1f} MB libérés)"
+            )
+    except Exception as e:
+        logger.warning(f"Startup uploads cleanup failed: {e}")
+
+
+def _start_periodic_disk_cleanup() -> None:
+    """
+    Thread daemon qui vide OUTPUT_DIR et UPLOAD_DIR toutes les 30 minutes.
+
+    Filet de sécurité : si un cleanup post-batch a foiré (crash, etc.), ce
+    thread rattrape au max 30min après. En condition normale, ne supprime rien.
+    """
+    import threading
+    import time as _time
+
+    def _loop():
+        _time.sleep(30 * 60)  # 30min avant le premier passage
+        while True:
+            try:
+                # OUTPUT_DIR : supprime tous les fichiers (mixes orphelins)
+                if OUTPUT_DIR.exists():
+                    count = 0
+                    total_bytes = 0
+                    cutoff = _time.time() - (10 * 60)  # garde les fichiers < 10min (batch en cours)
+                    for f in OUTPUT_DIR.iterdir():
+                        if not f.is_file():
+                            continue
+                        try:
+                            stat = f.stat()
+                            if stat.st_mtime > cutoff:
+                                continue  # trop récent, probablement batch en cours
+                            total_bytes += stat.st_size
+                            f.unlink()
+                            count += 1
+                        except Exception:
+                            pass
+                    if count > 0:
+                        logger.info(
+                            f"🧹 [video periodic] OUTPUT_DIR: {count} fichiers orphelins "
+                            f"supprimés ({total_bytes / (1024*1024):.1f} MB libérés)"
+                        )
+
+                # UPLOAD_DIR : pareil
+                if UPLOAD_DIR.exists():
+                    count = 0
+                    total_bytes = 0
+                    cutoff = _time.time() - (60 * 60)  # garde les sources < 1h
+                    for f in UPLOAD_DIR.iterdir():
+                        if not f.is_file():
+                            continue
+                        try:
+                            stat = f.stat()
+                            if stat.st_mtime > cutoff:
+                                continue
+                            total_bytes += stat.st_size
+                            f.unlink()
+                            count += 1
+                        except Exception:
+                            pass
+                    if count > 0:
+                        logger.info(
+                            f"🧹 [video periodic] UPLOAD_DIR: {count} fichiers orphelins "
+                            f"supprimés ({total_bytes / (1024*1024):.1f} MB libérés)"
+                        )
+            except Exception as e:
+                logger.warning(f"Periodic cleanup error: {e}")
+            _time.sleep(30 * 60)  # 30 minutes
+
+    try:
+        t = threading.Thread(target=_loop, daemon=True, name="video-disk-cleanup")
+        t.start()
+        logger.info("✅ Periodic disk cleanup thread started (every 30min)")
+    except Exception as e:
+        logger.warning(f"Failed to start periodic cleanup: {e}")
+
+
+# Lancement immédiat au chargement du module
+_startup_cleanup_outputs()
+_startup_cleanup_uploads()
+_start_periodic_disk_cleanup()
+
+
+# ---------------------------------------------------------------------------
 # Thread pool dédié aux uploads Drive : permet de paralléliser vraiment
 # les uploads sans bloquer le pool default asyncio (qui est déjà pris par
 # d'autres IO bloquants).
@@ -513,12 +648,18 @@ def _sanitize_batch_name(name: str) -> str:
 
 
 async def _async_drive_upload(result: dict, folder_id: str, batch_id: str = None) -> None:
-    """Upload un fichier vers Drive en arrière-plan. Modifie result in-place."""
+    """Upload un fichier vers Drive en arrière-plan. Modifie result in-place.
+
+    CLEANUP : supprime le fichier local après upload Drive réussi pour libérer
+    l'espace disque. Le filesystem du container Railway est limité (~5-10 GB),
+    on ne peut pas se permettre d'accumuler les outputs.
+    """
+    local_path = Path(result["path"])
     try:
         loop = asyncio.get_event_loop()
         # Utilise le pool dédié pour VRAIMENT paralléliser (pas bloquer le pool default)
         res = await loop.run_in_executor(
-            _drive_executor, upload_file, Path(result["path"]), folder_id
+            _drive_executor, upload_file, local_path, folder_id
         )
         if res:
             result["drive_url"] = res.get("webViewLink")
@@ -526,8 +667,30 @@ async def _async_drive_upload(result: dict, folder_id: str, batch_id: str = None
             if batch_id:
                 _update_progress(batch_id, uploaded_delta=1)
                 logger.info(f"[{batch_id}] Drive upload done: {result.get('filename')}")
+            # CLEANUP : supprime le fichier local après upload Drive réussi
+            try:
+                if local_path.exists():
+                    local_path.unlink()
+            except Exception as cleanup_err:
+                logger.warning(f"Cleanup local failed for {local_path.name}: {cleanup_err}")
+        else:
+            # Drive upload retourne None = échec silencieux. On supprime quand même
+            # le fichier local : le batch est tracé en historique, garder le fichier
+            # ne sert à rien et risque de saturer le disque.
+            try:
+                if local_path.exists():
+                    local_path.unlink()
+                    logger.warning(f"Drive upload returned None for {local_path.name}, file deleted locally")
+            except Exception:
+                pass
     except Exception as e:
         logger.warning(f"Drive upload échoué pour {result.get('filename')}: {e}")
+        # Même si Drive crash, on supprime le fichier local pour éviter accumulation
+        try:
+            if local_path.exists():
+                local_path.unlink()
+        except Exception:
+            pass
 
 
 @router.post("/process")
