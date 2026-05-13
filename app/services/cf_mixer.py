@@ -29,26 +29,30 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def _startup_cleanup() -> None:
     """
-    Cleanup au démarrage du module : supprime les fichiers orphelins
-    (mix_*.mp4 et _caption_*.ass) du dossier output.
-    Ces fichiers sont des reliquats de batchs précédents qui n'ont pas été
-    cleanés (crash, redéploiement, etc.). Les sources ne sont PAS touchées.
+    Cleanup au démarrage du module : supprime TOUS les fichiers du dossier output.
+
+    Justification : le dossier OUTPUT_DIR ne sert qu'à stocker temporairement
+    les mixes le temps de les uploader sur Drive. Une fois sur Drive, ils ne
+    servent plus à rien sur le volume Railway (volume limité, crash si plein).
+
+    Tout ce qui traîne dans OUTPUT_DIR au démarrage est forcément un reliquat
+    d'un batch précédent (crash, redéploiement, upload Drive échoué). On peut
+    tout supprimer SAFE — les vidéos sources (VIDEO_DIR), musique (MUSIC_DIR)
+    et templates (TEMPLATE_DIR) ne sont PAS dans OUTPUT_DIR.
     """
     try:
         cleaned_count = 0
         cleaned_bytes = 0
-        for f in OUTPUT_DIR.glob("mix_*.mp4"):
-            try:
-                cleaned_bytes += f.stat().st_size
-                f.unlink()
-                cleaned_count += 1
-            except Exception:
-                pass
-        for f in OUTPUT_DIR.glob("_caption_*.ass"):
-            try:
-                f.unlink()
-            except Exception:
-                pass
+        if OUTPUT_DIR.exists():
+            for f in OUTPUT_DIR.iterdir():
+                if not f.is_file():
+                    continue
+                try:
+                    cleaned_bytes += f.stat().st_size
+                    f.unlink()
+                    cleaned_count += 1
+                except Exception:
+                    pass
         if cleaned_count > 0:
             mb = cleaned_bytes / (1024 * 1024)
             try:
@@ -61,8 +65,79 @@ def _startup_cleanup() -> None:
         pass
 
 
+def _cleanup_output_dir_aggressive() -> tuple:
+    """
+    Cleanup AGRESSIF du dossier OUTPUT_DIR : supprime TOUS les fichiers.
+
+    À appeler après chaque batch ou périodiquement. Le dossier ne sert qu'à
+    stocker temporairement les mixes avant upload Drive. Si Drive a échoué,
+    les fichiers sont perdus de toute façon (pas de retry, et le batch est
+    déjà loggé en historique).
+
+    Returns: (count, bytes_freed)
+    """
+    count = 0
+    total_bytes = 0
+    try:
+        if OUTPUT_DIR.exists():
+            for f in OUTPUT_DIR.iterdir():
+                if not f.is_file():
+                    continue
+                try:
+                    total_bytes += f.stat().st_size
+                    f.unlink()
+                    count += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return count, total_bytes
+
+
+def _start_periodic_output_cleanup() -> None:
+    """
+    Lance un thread daemon qui vide OUTPUT_DIR toutes les 30 minutes.
+
+    Sécurité multi-couche :
+    1. Le cleanup post-batch (dans mix_videos_stream) supprime déjà après upload
+    2. Le startup cleanup nettoie au boot
+    3. Ce cleanup périodique attrape les orphelins (crashes silencieux, Drive
+       upload échoué, etc.) pour éviter que le volume Railway se remplisse.
+    """
+    import threading
+    import time as _time
+
+    def _loop():
+        # Attend 30min avant le premier cleanup (laisse le temps aux batchs actifs)
+        _time.sleep(30 * 60)
+        while True:
+            try:
+                count, bytes_freed = _cleanup_output_dir_aggressive()
+                if count > 0:
+                    mb = bytes_freed / (1024 * 1024)
+                    try:
+                        import logging as _logging
+                        _logging.getLogger(__name__).info(
+                            f"🧹 [cf_mixer periodic] Cleanup OUTPUT_DIR: "
+                            f"{count} fichiers supprimés ({mb:.1f} MB libérés)"
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            _time.sleep(30 * 60)  # 30 minutes
+
+    try:
+        t = threading.Thread(target=_loop, daemon=True, name="cf-output-cleanup")
+        t.start()
+    except Exception:
+        pass
+
+
 # Cleanup auto au démarrage du module (= démarrage du bot Railway)
 _startup_cleanup()
+# Lance le cleanup périodique en background
+_start_periodic_output_cleanup()
 
 
 # ===== CONCURRENCE LOCK =====
@@ -1353,6 +1428,19 @@ def mix_batch_stream(
         logger.warning(f"Save batch history échoué: {e}")
 
     yield {"type": "done", "outputs": output_metas, "total_elapsed": round(total_elapsed, 2), "drive": drive_info}
+
+    # ===== CLEANUP FINAL AGRESSIF =====
+    # Même si Drive a échoué pour certains fichiers, on les supprime de toute façon :
+    # - Le volume Railway est limité, on ne peut pas se permettre de les garder
+    # - Le batch est déjà enregistré en historique, donc traçable
+    # - Si Drive a foiré, les vidéos sont perdues mais le serveur ne crash pas
+    try:
+        _final_count, _final_bytes = _cleanup_output_dir_aggressive()
+        if _final_count > 0:
+            _final_mb = _final_bytes / (1024 * 1024)
+            logger.info(f"🧹 [cf_mixer end-of-batch] Cleanup OUTPUT_DIR: {_final_count} fichiers ({_final_mb:.1f} MB)")
+    except Exception:
+        pass
 
     # ===== CLEANUP MÉMOIRE (évite OOM kill au fil des batchs) =====
     try:
