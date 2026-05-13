@@ -2,17 +2,59 @@
 Configuration centrale de l'application.
 Toutes les bornes min/max des paramètres de randomisation sont ici.
 """
+import os
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# ============================================================================
+# CHEMINS DE STOCKAGE
+# ============================================================================
+# IMPORTANT : sur Railway, le filesystem du container est LIMITÉ (~5-10 GB
+# selon le plan) et il sert à FAIRE TOURNER l'app. Stocker des vidéos dedans
+# = crash garanti.
+#
+# Le volume Railway monté sur /data est de 100 GB (plan Pro) et est PERSISTANT
+# entre redéploiements. C'est LÀ qu'on doit stocker les outputs/uploads.
+#
+# Fallback : si /data n'existe pas (dev local), on utilise un dossier dans
+# le code source comme avant.
+
+_PROJECT_DIR = Path(__file__).resolve().parent.parent  # racine du repo
+
+
+def _resolve_storage_root() -> Path:
+    """Détermine où stocker uploads/outputs."""
+    # 1) Override explicite via env var
+    override = os.environ.get("REPURPOSE_STORAGE_DIR", "").strip()
+    if override:
+        return Path(override)
+
+    # 2) Volume Railway /data si dispo
+    data_root = Path("/data")
+    if data_root.exists() and data_root.is_dir():
+        try:
+            test = data_root / ".repurpose_write_test"
+            test.touch(exist_ok=True)
+            test.unlink(missing_ok=True)
+            return data_root / "repurpose"
+        except Exception:
+            pass
+
+    # 3) Fallback : dossier dans le repo (dev local uniquement)
+    return _PROJECT_DIR
+
+
+BASE_DIR = _resolve_storage_root()
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "outputs"
-LOG_DIR = BASE_DIR / "logs"
+LOG_DIR = _PROJECT_DIR / "logs"  # logs restent dans le code, c'est éphémère c'est OK
 
 for d in (UPLOAD_DIR, OUTPUT_DIR, LOG_DIR):
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 
 
 class Settings(BaseSettings):
