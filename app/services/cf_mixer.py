@@ -1034,20 +1034,21 @@ def mix_batch_stream(
         device_custom_ranges = dict(custom_ranges or {})
         if account and window:
             try:
-                # Bitrate table par modèle (kbps) - valeurs réalistes pour Instagram/TikTok
-                # Top iPhones (Pro/Pro Max) peuvent monter à 10 Mbps en pratique,
-                # on push à 8000 pour qualité max tout en restant crédible.
+                # Bitrate table par modèle (kbps) - valeurs réalistes pour Instagram/TikTok.
+                # Les vrais iPhones recordent en 1080p à 15-40 Mbps natif. Insta
+                # re-encode tout à ~5 Mbps de toute façon, le bitrate brut n'est
+                # PAS un signal de détection. On vise haut pour rendu net.
+                # Les modèles "regular" (iPhone X / iPhone X Plus) tombent sur le
+                # fallback Air/Plus (6000-8000), assez propre.
                 _BITRATE_BY_MODEL = {
-                    "iPhone 17 Pro Max": (6000, 8000),
-                    "iPhone 17 Pro":     (6000, 8000),
-                    "iPhone 17 Air":     (3500, 4500),
-                    "iPhone 17":         (3500, 4500),
-                    "iPhone 16 Pro Max": (6000, 8000),
-                    "iPhone 16 Pro":     (6000, 8000),
-                    "iPhone 16 Plus":    (3500, 4500),
-                    "iPhone 16":         (3500, 4500),
+                    "iPhone 17 Pro Max": (10000, 13000),
+                    "iPhone 17 Pro":     (9000, 11000),
+                    "iPhone 17 Air":     (6000, 8000),
+                    "iPhone 16 Pro Max": (10000, 13000),
+                    "iPhone 16 Pro":     (9000, 11000),
+                    "iPhone 16 Plus":    (6000, 8000),
                 }
-                bitrate_range = _BITRATE_BY_MODEL.get(spoof_meta.get("model", ""), (3500, 4500))
+                bitrate_range = _BITRATE_BY_MODEL.get(spoof_meta.get("model", ""), (6000, 8000))
                 device_custom_ranges["bitrate"] = bitrate_range
                 # Note : on ne force PAS le fps de sortie. Garder le fps source
                 # évite les artefacts de compression (force 60 fps depuis source 30 fps
