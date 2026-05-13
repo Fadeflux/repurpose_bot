@@ -175,10 +175,36 @@ def respoof_video(
     )
 
     logger.info(f"[respoof] FFmpeg cmd: {' '.join(cmd[:25])}...")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if result.returncode != 0:
-        logger.error(f"[respoof] FFmpeg failed: {result.stderr[-500:]}")
-        raise RuntimeError(f"FFmpeg respoof failed: {result.stderr[-300:]}")
+    # MEM FIX : capture_output=True buffer tout stderr en RAM (potentiellement plusieurs MB).
+    # On redirige stderr vers un fichier temp, lu seulement en cas d'erreur (2KB max).
+    import tempfile as _tempfile
+    with _tempfile.NamedTemporaryFile(mode="w+b", delete=False, suffix=".log") as _err_log:
+        _err_log_path = _err_log.name
+    try:
+        with open(_err_log_path, "wb") as _err_f:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=_err_f,
+                timeout=300,
+            )
+        if result.returncode != 0:
+            err_tail = ""
+            try:
+                with open(_err_log_path, "rb") as _ef:
+                    _ef.seek(0, 2)
+                    _size = _ef.tell()
+                    _ef.seek(max(0, _size - 2048))
+                    err_tail = _ef.read().decode("utf-8", errors="ignore")
+            except Exception:
+                pass
+            logger.error(f"[respoof] FFmpeg failed: {err_tail[-500:]}")
+            raise RuntimeError(f"FFmpeg respoof failed: {err_tail[-300:]}")
+    finally:
+        try:
+            Path(_err_log_path).unlink(missing_ok=True)
+        except Exception:
+            pass
 
     out_size = Path(output_path).stat().st_size if Path(output_path).exists() else 0
 

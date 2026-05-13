@@ -621,9 +621,36 @@ def mix_one(
                                        audio_priority, out_path, metadata=meta)
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if result.returncode != 0:
-            raise RuntimeError(f"FFmpeg failed: {result.stderr[-500:]}")
+        # MEM FIX : on n'utilise PAS capture_output=True (bufferise tout en RAM).
+        # On redirige stderr vers un fichier temp et on relit que les derniers 2KB en cas d'erreur.
+        # FFmpeg verbose peut produire des MB de logs sur des mix longs.
+        import tempfile as _tempfile
+        with _tempfile.NamedTemporaryFile(mode="w+b", delete=False, suffix=".log") as _err_log:
+            _err_log_path = _err_log.name
+        try:
+            with open(_err_log_path, "wb") as _err_f:
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=_err_f,
+                    timeout=600,
+                )
+            if result.returncode != 0:
+                # Lit seulement les 2 derniers KB du log pour message d'erreur
+                try:
+                    with open(_err_log_path, "rb") as _err_f:
+                        _err_f.seek(0, 2)  # fin
+                        _size = _err_f.tell()
+                        _err_f.seek(max(0, _size - 2048))
+                        _tail = _err_f.read().decode("utf-8", errors="ignore")
+                except Exception:
+                    _tail = ""
+                raise RuntimeError(f"FFmpeg failed: {_tail[-500:]}")
+        finally:
+            try:
+                Path(_err_log_path).unlink(missing_ok=True)
+            except Exception:
+                pass
     except subprocess.TimeoutExpired:
         raise RuntimeError("FFmpeg timeout")
     finally:
@@ -968,11 +995,18 @@ def mix_batch_stream(
         cmd_with_progress = cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:]
 
         item_started = time.time()
+        # MEM FIX : stderr en PIPE qui n'est jamais lu pendant l'exec = buffer pipe sature
+        # à 64KB (Linux) puis ffmpeg se bloque OU Python accumule en RAM. On redirige
+        # stderr vers un fichier temp, lu seulement si erreur.
+        import tempfile as _tempfile
+        with _tempfile.NamedTemporaryFile(mode="w+b", delete=False, suffix=".log") as _err_log:
+            _err_log_path = _err_log.name
+        _err_file_handle = open(_err_log_path, "wb")
         try:
             proc = subprocess.Popen(
                 cmd_with_progress,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=_err_file_handle,
                 text=True,
                 bufsize=1,
             )
@@ -1007,12 +1041,34 @@ def mix_batch_stream(
                     break
 
             proc.wait(timeout=600)
+            # Ferme stdout pour libérer le pipe
+            try:
+                if proc.stdout:
+                    proc.stdout.close()
+            except Exception:
+                pass
+            # Flush et ferme le file handle stderr
+            try:
+                _err_file_handle.flush()
+                _err_file_handle.close()
+            except Exception:
+                pass
+
             if proc.returncode != 0:
-                err = (proc.stderr.read() if proc.stderr else "")
+                # Lit seulement les 2 derniers KB du log d'erreur (pas tout en RAM)
+                err = ""
+                try:
+                    with open(_err_log_path, "rb") as _ef:
+                        _ef.seek(0, 2)
+                        _size = _ef.tell()
+                        _ef.seek(max(0, _size - 2048))
+                        err = _ef.read().decode("utf-8", errors="ignore")
+                except Exception:
+                    err = ""
                 # Log COMPLET côté serveur pour qu'on puisse débugger via Railway logs
                 logger.error(f"FFmpeg failed (returncode={proc.returncode}) for variant {item_idx}")
                 logger.error(f"Command was: {' '.join(cmd_with_progress)}")
-                logger.error(f"FFmpeg stderr (full):\n{err}")
+                logger.error(f"FFmpeg stderr (last 2KB):\n{err}")
                 # Envoie un résumé court côté UI
                 short_err = err.strip()[-300:].replace("\n", " | ")
                 yield {"type": "log", "level": "ERROR", "message": f"FFmpeg fail: {short_err[:200]}"}
@@ -1021,7 +1077,14 @@ def mix_batch_stream(
                 if ass_path and ass_path.exists():
                     try: ass_path.unlink()
                     except Exception: pass
+                # cleanup log temp
+                try: Path(_err_log_path).unlink(missing_ok=True)
+                except Exception: pass
                 continue
+
+            # cleanup log temp succès
+            try: Path(_err_log_path).unlink(missing_ok=True)
+            except Exception: pass
 
             # Cleanup ASS temp après ffmpeg success
             if ass_path and ass_path.exists():
@@ -1055,6 +1118,20 @@ def mix_batch_stream(
         except Exception as e:
             yield {"type": "log", "level": "ERROR", "message": f"Exception: {e}"}
             yield {"type": "item_error", "index": item_idx, "error": str(e)}
+        finally:
+            # MEM FIX : cleanup garanti du file handle + log temp pour ne pas leak les FD
+            try:
+                if not _err_file_handle.closed:
+                    _err_file_handle.close()
+            except Exception:
+                pass
+            try:
+                Path(_err_log_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+            # Force GC après chaque variant pour libérer les buffers ffmpeg
+            import gc as _gc
+            _gc.collect()
 
     total_elapsed = time.time() - started
     yield {"type": "log", "level": "INFO", "message": f"Mix terminé · {len(output_metas)}/{total} OK · {round(total_elapsed,1)}s"}

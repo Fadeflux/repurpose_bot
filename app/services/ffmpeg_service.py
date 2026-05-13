@@ -240,13 +240,41 @@ async def process_one(
 
     logger.info(f"[{job_id}] copy {copy_index} -> {out_name}")
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
-    _, stderr = await proc.communicate()
+    # MEM FIX : proc.communicate() avec stderr=PIPE charge TOUT stderr en RAM.
+    # Sur des ffmpeg longs (vidéos lourdes), ffmpeg verbose peut produire plusieurs MB
+    # de logs. Avec plusieurs encodes en parallèle (concurrency=3), c'est 10aine de MB
+    # de logs en RAM jamais libérés. On redirige stderr vers un fichier temp.
+    import tempfile as _tempfile
+    with _tempfile.NamedTemporaryFile(mode="w+b", delete=False, suffix=".log") as _err_log:
+        _err_log_path = _err_log.name
+
+    _err_f = open(_err_log_path, "wb")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=_err_f
+        )
+        await proc.wait()
+    finally:
+        try:
+            _err_f.close()
+        except Exception:
+            pass
 
     if proc.returncode != 0:
-        err = stderr.decode(errors="ignore")[-500:]
+        # Lit seulement les 2 derniers KB du log d'erreur
+        err = ""
+        try:
+            with open(_err_log_path, "rb") as _ef:
+                _ef.seek(0, 2)
+                _size = _ef.tell()
+                _ef.seek(max(0, _size - 2048))
+                err = _ef.read().decode(errors="ignore")[-500:]
+        except Exception:
+            err = ""
+        try:
+            Path(_err_log_path).unlink(missing_ok=True)
+        except Exception:
+            pass
         logger.error(f"[{job_id}] ffmpeg a échoué (copy {copy_index}): {err}")
         if out_path.exists():
             out_path.unlink(missing_ok=True)
@@ -257,6 +285,11 @@ async def process_one(
             "params": params,
             "metadata": meta,
         }
+    # Cleanup log temp en cas de succès
+    try:
+        Path(_err_log_path).unlink(missing_ok=True)
+    except Exception:
+        pass
 
     # Post-processing : patch les creation_time des streams pour qu'ils soient distincts
     # (FFmpeg écrase les timings stream avec le format par défaut, on contourne)

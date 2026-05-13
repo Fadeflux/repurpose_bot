@@ -1232,21 +1232,33 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                         return
 
         # 6. Download du fichier depuis Discord (déjà déféré plus haut)
+        # MEM FIX : pour les vidéos, on stream vers disque pour ne pas charger
+        # 50-100 MB en RAM. Seules les photos (petites) sont chargées en mémoire
+        # (car cf_respoof.respoof_photo prend input_bytes en paramètre).
+        tmpdir = Path(tempfile.gettempdir()) / "cf_respoof"
+        tmpdir.mkdir(parents=True, exist_ok=True)
+        in_ext = Path(fichier.filename).suffix.lower() or ".bin"
+        tmp_in = tmpdir / f"respoof_in_{uuid.uuid4().hex}{in_ext}"
+
+        file_bytes = b""  # rempli seulement si photo
         try:
-            file_bytes = await fichier.read()
+            if file_type == "photo":
+                # Photos : on garde en RAM (petits fichiers, et l'API respoof_photo en a besoin)
+                file_bytes = await fichier.read()
+                tmp_in.write_bytes(file_bytes)
+            else:
+                # Vidéos : stream direct vers disque (pas de RAM)
+                await fichier.save(str(tmp_in))
         except Exception as e:
             await interaction.followup.send(
                 f"❌ Impossible de lire le fichier : {e}",
                 ephemeral=True,
             )
+            try:
+                tmp_in.unlink(missing_ok=True)
+            except Exception:
+                pass
             return
-
-        # 8. Sauvegarde temporaire en local
-        tmpdir = Path(tempfile.gettempdir()) / "cf_respoof"
-        tmpdir.mkdir(parents=True, exist_ok=True)
-        in_ext = Path(fichier.filename).suffix.lower() or ".bin"
-        tmp_in = tmpdir / f"respoof_in_{uuid.uuid4().hex}{in_ext}"
-        tmp_in.write_bytes(file_bytes)
 
         # 9. Détermine team / tz / target_hour (depuis la fenêtre choisie par le VA)
         team = _detect_team_from_guild(interaction.guild_id if interaction.guild else None)
@@ -1274,12 +1286,17 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                     target_hour=target_hour,
                     tz_name=tz_name,
                 )
+                # Libère file_bytes immédiatement après usage
+                del file_bytes
+                file_bytes = b""
                 # Sauvegarde local
                 out_name = f"respoof_{clean_username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
                 tmp_out = tmpdir / out_name
                 tmp_out.write_bytes(spoofed_bytes)
+                # Libère spoofed_bytes après écriture disque
+                del spoofed_bytes
             else:
-                # Vidéo : transcode in-place
+                # Vidéo : transcode in-place (file_bytes pas utilisé pour vidéo)
                 out_name = f"respoof_{clean_username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
                 tmp_out = tmpdir / out_name
                 info = cf_respoof.respoof_video(
