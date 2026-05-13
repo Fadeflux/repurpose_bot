@@ -647,7 +647,10 @@ def _build_ffmpeg_cmd(
 
     cmd += [
         "-c:v", "libx264",
-        "-preset", "veryfast",
+        # medium = compression 2-3x meilleure que veryfast à bitrate égal.
+        # Encode plus lent (30s → 60-90s par vidéo) mais qualité visuelle nettement
+        # supérieure (moins de pixellisation/artefacts dans le mouvement).
+        "-preset", "medium",
         "-crf", "23",
         "-b:v", f"{bitrate_kbps}k",
         "-pix_fmt", "yuv420p",
@@ -1032,15 +1035,15 @@ def mix_batch_stream(
         if account and window:
             try:
                 # Bitrate table par modèle (kbps) - valeurs réalistes pour Instagram/TikTok
-                # Top iPhones peuvent monter à 6+ Mbps en pratique, on reste crédible
-                # mais avec une qualité visuelle nettement meilleure qu'avant.
+                # Top iPhones (Pro/Pro Max) peuvent monter à 10 Mbps en pratique,
+                # on push à 8000 pour qualité max tout en restant crédible.
                 _BITRATE_BY_MODEL = {
-                    "iPhone 17 Pro Max": (4500, 6000),
-                    "iPhone 17 Pro":     (4500, 6000),
+                    "iPhone 17 Pro Max": (6000, 8000),
+                    "iPhone 17 Pro":     (6000, 8000),
                     "iPhone 17 Air":     (3500, 4500),
                     "iPhone 17":         (3500, 4500),
-                    "iPhone 16 Pro Max": (4500, 6000),
-                    "iPhone 16 Pro":     (4500, 6000),
+                    "iPhone 16 Pro Max": (6000, 8000),
+                    "iPhone 16 Pro":     (6000, 8000),
                     "iPhone 16 Plus":    (3500, 4500),
                     "iPhone 16":         (3500, 4500),
                 }
