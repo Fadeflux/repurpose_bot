@@ -2,7 +2,7 @@
 ClipFusion — Content : upload + list + delete + filter raw videos.
 Routes montées sous /api/clipfusion/content/...
 """
-import shutil
+import gc
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,6 +23,10 @@ VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTS = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
 
+# Chunk size pour streaming upload : 1 MB
+# Évite de charger la vidéo entière en RAM (cause de OOM 5GB sur Railway)
+CHUNK_SIZE = 1024 * 1024  # 1 MB
+
 
 @router.post("/upload")
 async def upload_videos(
@@ -32,6 +36,8 @@ async def upload_videos(
     """
     Upload de vidéos brutes. Le model_id (catégorie) est OBLIGATOIRE
     pour qu'on sache à quelle modèle ces vidéos appartiennent.
+
+    Streaming par chunks de 1 MB pour ne pas saturer la RAM.
     """
     if not model_id:
         raise HTTPException(400, "model_id (catégorie) obligatoire pour upload de vidéos")
@@ -44,15 +50,50 @@ async def upload_videos(
     for f in files:
         ext = Path(f.filename).suffix.lower()
         if ext not in ALLOWED_EXTS:
+            try:
+                await f.close()
+            except Exception:
+                pass
             continue
+
         save_name = f"{uuid.uuid4().hex}{ext}"
         save_path = VIDEO_DIR / save_name
-        with open(save_path, "wb") as out:
-            shutil.copyfileobj(f.file, out)
+        size_bytes = 0
+
         try:
-            size_bytes = save_path.stat().st_size
-        except Exception:
-            size_bytes = 0
+            # Streaming : on lit par chunks de 1 MB et on écrit direct sur disque
+            # Pas de chargement complet en RAM
+            with open(save_path, "wb") as out:
+                while True:
+                    chunk = await f.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    size_bytes += len(chunk)
+                    # Libère immédiatement la référence au chunk
+                    del chunk
+        except Exception as e:
+            logger.error(f"Erreur upload {f.filename}: {e}")
+            # Cleanup du fichier partiellement écrit
+            try:
+                if save_path.exists():
+                    save_path.unlink()
+            except Exception:
+                pass
+            try:
+                await f.close()
+            except Exception:
+                pass
+            continue
+        finally:
+            # TOUJOURS fermer le UploadFile pour libérer la RAM
+            try:
+                await f.close()
+            except Exception:
+                pass
+
+        logger.info(f"📤 Upload OK: {f.filename} → {save_name} ({size_bytes / 1024 / 1024:.1f} MB)")
+
         meta = storage.add_video(
             filename=save_name,
             path=str(save_path),
@@ -62,6 +103,10 @@ async def upload_videos(
         )
         if meta:
             saved.append(meta)
+
+    # Force le garbage collector à libérer la mémoire après tous les uploads
+    gc.collect()
+
     return {"saved": saved}
 
 
@@ -119,11 +164,11 @@ async def clear_videos(confirm: str = Query("")):
 async def cleanup_orphans(dry_run: bool = Query(True)):
     """
     Liste les entrées DB qui pointent vers un fichier disque inexistant.
-    
+
     PROTECTION : par défaut dry_run=True (juste lister, pas supprimer).
     Pour vraiment supprimer, il faut explicitement passer ?dry_run=false
     ET la suppression sera loggée.
-    
+
     Utile uniquement après migration vers volume persistant.
     Évite de l'utiliser sans raison précise — peut supprimer toutes tes vidéos
     si le volume est temporairement détaché.
@@ -162,11 +207,11 @@ async def cleanup_orphans(dry_run: bool = Query(True)):
 async def filter_videos(payload: Dict[str, Any] = Body(default={})):
     """
     Analyse les vidéos selon des critères (horizontal, talking, captions).
-    
+
     PROTECTION : par défaut dry_run=True (juste analyser, ne pas supprimer).
     Le filter captions est désactivé par défaut (puisque tu veux GARDER les
     vidéos avec captions pour les traiter, pas les supprimer).
-    
+
     Pour vraiment supprimer : payload = {dry_run: false}
     """
     # PROTECTION : tous les filtres OFF par défaut, dry_run ON par défaut
