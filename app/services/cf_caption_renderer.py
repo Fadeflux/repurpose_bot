@@ -259,6 +259,14 @@ def render_caption_png(
     layout_lines: List[List[Tuple[str, str]]] = []
 
     for raw_line in raw_lines:
+        # Ligne vide (saut de paragraphe) : on préserve l'espacement en ajoutant
+        # une layout_line vide. Le rendering avance y de line_height sans rien
+        # dessiner → ça donne l'espace blanc attendu entre paragraphes.
+        # Sans ça, "\n\n" était silencieusement collapsé en "\n".
+        if not raw_line.strip():
+            layout_lines.append([])
+            continue
+
         tokens = _tokenize(raw_line)
         # Expand "text" tokens en mots pour permettre le word-wrap
         expanded: List[Tuple[str, str]] = []
