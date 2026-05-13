@@ -101,9 +101,9 @@ PARAM_RANGES = {
     "gamma":      (0.95, 1.05),
     "speed":      (1.03, 1.04),
     "zoom":       (1.03, 1.06),
-    # Noise bas (1-3) : invisible à l'œil mais casse encore les hash pixel.
-    # Le perceptual hash Insta/TikTok est déjà cassé par les autres filtres.
-    "noise":      (1, 3),
+    # Noise désactivé (0, 0) : rendu propre sans grain visible.
+    # Le perceptual hash Insta/TikTok est cassé par les autres filtres.
+    "noise":      (0, 0),
     "vignette":   (0.20, 0.40),
     "rotation":   (-0.5, 0.5),
     "cut_start":  (0.1, 0.15),

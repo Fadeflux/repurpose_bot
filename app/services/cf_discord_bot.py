@@ -101,11 +101,15 @@ def _channel_msg_ttl() -> int:
 
 
 def _seconds_per_video() -> int:
-    """Estimation moyenne du temps de génération d'1 vidéo (en secondes)."""
+    """
+    Estimation moyenne du temps de génération d'1 vidéo (en secondes).
+    Augmenté de 8s à 22s après passage du preset libx264 veryfast → medium
+    (compression 2-3x plus efficace mais encode 2-3x plus lent).
+    """
     try:
-        return int(os.environ.get("CF_SECONDS_PER_VIDEO", "8"))
+        return int(os.environ.get("CF_SECONDS_PER_VIDEO", "22"))
     except Exception:
-        return 8
+        return 22
 
 
 def _format_eta(seconds: int) -> str:
