@@ -13,6 +13,7 @@ from app.services import cf_storage as storage
 from app.services import cf_video_scanner as video_scanner
 from app.utils.logger import get_logger
 from app.utils.storage_paths import VIDEO_DIR
+from app.utils.upload_helper import save_upload_streaming
 
 logger = get_logger("cf_content")
 
@@ -22,10 +23,6 @@ router = APIRouter(prefix="/api/clipfusion/content", tags=["clipfusion-content"]
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTS = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
-
-# Chunk size pour streaming upload : 1 MB
-# Évite de charger la vidéo entière en RAM (cause de OOM 5GB sur Railway)
-CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 
 @router.post("/upload")
@@ -37,7 +34,7 @@ async def upload_videos(
     Upload de vidéos brutes. Le model_id (catégorie) est OBLIGATOIRE
     pour qu'on sache à quelle modèle ces vidéos appartiennent.
 
-    Streaming par chunks de 1 MB pour ne pas saturer la RAM.
+    Streaming par chunks de 1 MB pour ne pas saturer la RAM Railway.
     """
     if not model_id:
         raise HTTPException(400, "model_id (catégorie) obligatoire pour upload de vidéos")
@@ -58,39 +55,12 @@ async def upload_videos(
 
         save_name = f"{uuid.uuid4().hex}{ext}"
         save_path = VIDEO_DIR / save_name
-        size_bytes = 0
 
         try:
-            # Streaming : on lit par chunks de 1 MB et on écrit direct sur disque
-            # Pas de chargement complet en RAM
-            with open(save_path, "wb") as out:
-                while True:
-                    chunk = await f.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    size_bytes += len(chunk)
-                    # Libère immédiatement la référence au chunk
-                    del chunk
+            size_bytes = await save_upload_streaming(f, save_path)
         except Exception as e:
             logger.error(f"Erreur upload {f.filename}: {e}")
-            # Cleanup du fichier partiellement écrit
-            try:
-                if save_path.exists():
-                    save_path.unlink()
-            except Exception:
-                pass
-            try:
-                await f.close()
-            except Exception:
-                pass
             continue
-        finally:
-            # TOUJOURS fermer le UploadFile pour libérer la RAM
-            try:
-                await f.close()
-            except Exception:
-                pass
 
         logger.info(f"📤 Upload OK: {f.filename} → {save_name} ({size_bytes / 1024 / 1024:.1f} MB)")
 
@@ -104,7 +74,7 @@ async def upload_videos(
         if meta:
             saved.append(meta)
 
-    # Force le garbage collector à libérer la mémoire après tous les uploads
+    # Force le GC pour libérer toute mémoire accumulée pendant le batch
     gc.collect()
 
     return {"saved": saved}

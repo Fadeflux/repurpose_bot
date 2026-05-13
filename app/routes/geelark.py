@@ -84,8 +84,9 @@ async def push_test(
     # Sauvegarde le fichier en temp
     tmp_path = UPLOAD_TMP_DIR / f"test_{file.filename}"
     try:
-        with open(tmp_path, "wb") as f:
-            f.write(await file.read())
+        # MEM FIX : streaming au lieu de await file.read() qui charge la vidéo en RAM
+        from app.utils.upload_helper import save_upload_streaming
+        await save_upload_streaming(file, tmp_path)
 
         # 1. Démarre le phone si demandé
         if auto_start:
@@ -170,12 +171,13 @@ async def push_batch(
     logger.info(f"[{group_name}] {len(phone_ids)} phones trouvés")
 
     # 2. Sauvegarde des fichiers en local temp
+    # MEM FIX : streaming au lieu de await f.read() (chaque vidéo 50-100 MB en RAM)
+    from app.utils.upload_helper import save_upload_streaming
     saved_paths: List[Path] = []
     try:
         for f in files:
             p = UPLOAD_TMP_DIR / f.filename
-            with open(p, "wb") as out:
-                out.write(await f.read())
+            await save_upload_streaming(f, p)
             saved_paths.append(p)
         logger.info(f"[{group_name}] {len(saved_paths)} fichiers sauvegardés en local")
 

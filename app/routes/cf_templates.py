@@ -2,7 +2,6 @@
 ClipFusion — Templates : list, delete, clear, export, import, edit, custom create.
 Routes montées sous /api/clipfusion/templates/...
 """
-import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Dict
@@ -12,6 +11,7 @@ from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from app.services import cf_storage as storage
 from app.utils.logger import get_logger
 from app.utils.storage_paths import TEMPLATE_DIR as UPLOAD_DIR
+from app.utils.upload_helper import save_upload_streaming
 
 logger = get_logger("cf_templates")
 
@@ -94,9 +94,18 @@ async def create_custom(
         if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
             image_name = f"{uuid.uuid4().hex}{ext}"
             save_path = UPLOAD_DIR / image_name
-            with open(save_path, "wb") as f:
-                shutil.copyfileobj(image.file, f)
-            thumbnail_path = str(save_path)
+            try:
+                await save_upload_streaming(image, save_path)
+                thumbnail_path = str(save_path)
+            except Exception as e:
+                logger.error(f"Image upload failed: {e}")
+                thumbnail_path = None
+        else:
+            # Ext non supportée : ferme quand même le UploadFile
+            try:
+                await image.close()
+            except Exception:
+                pass
 
     tpl = storage.add_template(
         caption=caption.strip(),

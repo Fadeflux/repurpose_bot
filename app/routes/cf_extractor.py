@@ -3,7 +3,7 @@ ClipFusion — Extractor : créer des templates depuis screenshot OCR, manuel,
 ou extraction vidéo (caption + audio).
 Routes montées sous /api/clipfusion/extractor/...
 """
-import shutil
+import gc
 import uuid
 from pathlib import Path
 from typing import Any, Dict
@@ -16,6 +16,7 @@ from app.services import cf_ocr as ocr
 from app.services import cf_video_extractor as video_extractor
 from app.utils.logger import get_logger
 from app.utils.storage_paths import UPLOAD_DIR, MUSIC_DIR
+from app.utils.upload_helper import save_upload_streaming
 
 logger = get_logger("cf_extractor")
 
@@ -43,9 +44,9 @@ async def extract_from_screenshot(file: UploadFile = File(...)):
     ext = Path(file.filename).suffix.lower() or ".png"
     save_name = f"{uuid.uuid4().hex}{ext}"
     save_path = UPLOAD_DIR / save_name
-    with open(save_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    await save_upload_streaming(file, save_path)
     text = ocr.extract_text_from_image(str(save_path))
+    gc.collect()
     return {
         "caption": text,
         "image": save_name,
@@ -62,8 +63,7 @@ async def screenshot_auto_template(
     ext = Path(file.filename).suffix.lower() or ".png"
     save_name = f"{uuid.uuid4().hex}{ext}"
     save_path = UPLOAD_DIR / save_name
-    with open(save_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    await save_upload_streaming(file, save_path)
 
     text = ocr.extract_text_from_image(str(save_path))
     if not text:
@@ -80,6 +80,7 @@ async def screenshot_auto_template(
     # Pour l'UI on ajoute l'URL servie côté API
     tpl["image_url"] = f"/api/clipfusion/extractor/uploads/{save_name}"
     tpl["original_name"] = file.filename
+    gc.collect()
     return tpl
 
 
@@ -141,13 +142,17 @@ async def video_extract(
     do_text = str(extract_text).lower() in ("true", "1", "yes", "on")
     do_music = str(extract_music).lower() in ("true", "1", "yes", "on")
     if not do_text and not do_music:
+        try:
+            await file.close()
+        except Exception:
+            pass
         raise HTTPException(400, "Sélectionne au moins une option (texte ou musique)")
 
     ext = Path(file.filename).suffix.lower() or ".mp4"
     save_name = f"{uuid.uuid4().hex}{ext}"
     save_path = UPLOAD_DIR / save_name
-    with open(save_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    # MEM FIX : streaming au lieu de shutil.copyfileobj (vidéos = 50-100 MB)
+    await save_upload_streaming(file, save_path)
 
     result: Dict[str, Any] = {
         "filename": file.filename,
@@ -201,4 +206,5 @@ async def video_extract(
     except Exception:
         pass
 
+    gc.collect()
     return result
