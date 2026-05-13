@@ -1032,18 +1032,19 @@ def mix_batch_stream(
         if account and window:
             try:
                 # Bitrate table par modèle (kbps) - valeurs réalistes pour Instagram/TikTok
-                # iPhone compresse vers ~2-4 Mbps en pratique
+                # Top iPhones peuvent monter à 6+ Mbps en pratique, on reste crédible
+                # mais avec une qualité visuelle nettement meilleure qu'avant.
                 _BITRATE_BY_MODEL = {
-                    "iPhone 17 Pro Max": (2500, 3500),
-                    "iPhone 17 Pro":     (2500, 3500),
-                    "iPhone 17 Air":     (2000, 3000),
-                    "iPhone 17":         (2000, 3000),
-                    "iPhone 16 Pro Max": (2500, 3500),
-                    "iPhone 16 Pro":     (2500, 3500),
-                    "iPhone 16 Plus":    (2000, 3000),
-                    "iPhone 16":         (2000, 3000),
+                    "iPhone 17 Pro Max": (4500, 6000),
+                    "iPhone 17 Pro":     (4500, 6000),
+                    "iPhone 17 Air":     (3500, 4500),
+                    "iPhone 17":         (3500, 4500),
+                    "iPhone 16 Pro Max": (4500, 6000),
+                    "iPhone 16 Pro":     (4500, 6000),
+                    "iPhone 16 Plus":    (3500, 4500),
+                    "iPhone 16":         (3500, 4500),
                 }
-                bitrate_range = _BITRATE_BY_MODEL.get(spoof_meta.get("model", ""), (2000, 3000))
+                bitrate_range = _BITRATE_BY_MODEL.get(spoof_meta.get("model", ""), (3500, 4500))
                 device_custom_ranges["bitrate"] = bitrate_range
                 # Note : on ne force PAS le fps de sortie. Garder le fps source
                 # évite les artefacts de compression (force 60 fps depuis source 30 fps
