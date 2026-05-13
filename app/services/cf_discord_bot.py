@@ -667,6 +667,12 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             await interaction.response.send_message(msg, ephemeral=True)
             return
 
+        # DEFER : à partir d'ici on fait des appels DB (email, rate limit, model
+        # lookup, accounts, interval check) qui peuvent prendre > 3s sur Railway.
+        # Sans defer, Discord affiche "L'application ne répond plus".
+        # On peut envoyer des followups ephemeral OU publics après ce defer.
+        await interaction.response.defer(ephemeral=False, thinking=True)
+
         # 2.5. CHECK EMAIL VA (obligatoire pour pouvoir partager le Drive)
         # Les admins sont bypass (ils ont déjà accès au Drive complet)
         if not _is_admin(interaction.user):
@@ -679,7 +685,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 va_email_req = ""
 
             if not va_email_req:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "❌ **Tu n'as pas encore enregistré ton email.**\n\n"
                     "Pour utiliser `/request`, tu dois d'abord poster ton adresse Gmail "
                     "dans le canal **#email-drive**.\n\n"
@@ -692,13 +698,13 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         # 3. Validation quantité
         max_q = _max_videos_per_request()
         if quantite < 1:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ Quantité invalide (min 1).",
                 ephemeral=True,
             )
             return
         if quantite > max_q:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ Quantité trop élevée (max {max_q}).",
                 ephemeral=True,
             )
@@ -716,7 +722,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 msg = f"❌ Modèle **ID{modele}** introuvable.\nDispos : {lst}"
             else:
                 msg = f"❌ Modèle **ID{modele}** introuvable.\nAucun modèle créé pour l'instant. Demande à l'admin."
-            await interaction.response.send_message(msg, ephemeral=True)
+            await interaction.followup.send(msg, ephemeral=True)
             return
 
         # À partir d'ici, on remplace `modele` (numéro VA) par le VRAI DB id.
@@ -744,7 +750,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                         f"Tu as épuisé ton quota de **{limit}** vidéos sur les **{days}** derniers jours.\n"
                         f"Reviens dans quelques jours, le quota se réinitialise progressivement."
                     )
-                await interaction.response.send_message(msg, ephemeral=True)
+                await interaction.followup.send(msg, ephemeral=True)
                 # Notif admin dans le canal #spoofbot-notifs
                 guild_id = interaction.guild_id if interaction.guild_id else None
                 team_for_notif = _detect_team_from_guild(guild_id)
@@ -776,7 +782,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         is_new_account = False
         clean_username = compte.strip().lstrip("@").strip() if compte else ""
         if not clean_username:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Le nom du compte est invalide. Tape par exemple `compte:sara_official_2026` (sans @).",
                 ephemeral=True,
             )
@@ -793,7 +799,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             if owner_id and owner_id != user_id_str and not is_admin_user:
                 # Trouver le nom du vrai propriétaire pour le message d'erreur
                 owner_name = existing.get("va_name", "un autre VA")
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"❌ Le compte **@{clean_username}** appartient déjà à **{owner_name}**.\n"
                     f"Si c'est une erreur, demande à un admin de le réassigner.",
                     ephemeral=True,
@@ -814,7 +820,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 va_name=interaction.user.display_name or interaction.user.name,
             )
             if not account_data:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"❌ Impossible de créer le compte @{clean_username}. Réessaie ou ping un admin.",
                     ephemeral=True,
                 )
@@ -847,7 +853,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                         h = int(wait.total_seconds() // 3600)
                         m = int((wait.total_seconds() % 3600) // 60)
                         wait_str = f"{h}h{m:02d}" if h > 0 else f"{m} min"
-                        await interaction.response.send_message(
+                        await interaction.followup.send(
                             f"⏰ **Intervalle min non respecté pour @{account_data['username']}**\n"
                             f"Le dernier batch sur ce compte a eu lieu il y a moins de **{min_interval_h}h**.\n"
                             f"Reviens dans **{wait_str}** pour que ce compte ne paraisse pas suspect.\n"
@@ -894,30 +900,23 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 f"📩 <@{interaction.user.id}> tu as reçu un DM avec les détails. Position dans la file : **{position}**"
             )
         ttl = _channel_msg_ttl()
-        # Note : on essaie d'abord avec delete_after, fallback sans si la version discord.py
-        # ne le supporte pas, puis suppression manuelle via task async
-        ack_message = None
+        # On a defer en haut → faut envoyer un followup. followup.send retourne
+        # la message en discord.py 2.x, on programme la suppression via task async.
+        sent_msg = None
         try:
-            if ttl > 0:
-                await interaction.response.send_message(
-                    ack,
-                    ephemeral=False,
-                    delete_after=float(ttl),
-                )
-            else:
-                await interaction.response.send_message(ack, ephemeral=False)
-        except TypeError:
-            # Version discord.py qui ne supporte pas delete_after sur ce send : fallback
-            await interaction.response.send_message(ack, ephemeral=False)
-            if ttl > 0:
-                async def _auto_delete_response():
-                    try:
-                        await asyncio.sleep(ttl)
-                        msg = await interaction.original_response()
-                        await msg.delete()
-                    except Exception:
-                        pass
-                asyncio.create_task(_auto_delete_response())
+            sent_msg = await interaction.followup.send(ack, ephemeral=False)
+        except Exception as _send_err:
+            logger.warning(f"followup.send ack failed: {_send_err}")
+            sent_msg = None
+
+        if sent_msg is not None and ttl > 0:
+            async def _auto_delete_ack(msg=sent_msg, delay=float(ttl)):
+                try:
+                    await asyncio.sleep(delay)
+                    await msg.delete()
+                except Exception:
+                    pass
+            asyncio.create_task(_auto_delete_ack())
 
         # 7. DM "en préparation" envoyé immédiatement au VA avec l'ETA
         try:
