@@ -53,26 +53,44 @@ def _get_bot_token() -> Optional[str]:
 def _get_onboarding_channel_ids() -> List[int]:
     """Retourne la liste des IDs de canaux onboarding (toutes équipes)."""
     channel_ids = []
-    for env_var in ("DISCORD_ONBOARDING_CHANNEL_ID", "DISCORD_ONBOARDING_CHANNEL_ID_INSTAGRAM"):
+    for env_var in (
+        "DISCORD_ONBOARDING_CHANNEL_ID",
+        "DISCORD_ONBOARDING_CHANNEL_ID_INSTAGRAM",
+        "DISCORD_ONBOARDING_CHANNEL_ID_THREADS",
+    ):
         val = os.getenv(env_var, "").strip()
         if val:
             try:
                 channel_ids.append(int(val))
             except ValueError:
                 pass
+    # Hardcoded fallback : canal gmail-drive du serveur Threads
+    # (Geelark et Instagram sont via env vars Railway)
+    threads_gmail_drive = 1504616895112810577
+    if threads_gmail_drive not in channel_ids:
+        channel_ids.append(threads_gmail_drive)
     return channel_ids
 
 
 def _get_spoof_channel_ids() -> List[int]:
     """Retourne la liste des IDs de canaux spoof-photos (toutes équipes)."""
     channel_ids = []
-    for env_var in ("DISCORD_SPOOF_CHANNEL_ID", "DISCORD_SPOOF_CHANNEL_ID_INSTAGRAM"):
+    for env_var in (
+        "DISCORD_SPOOF_CHANNEL_ID",
+        "DISCORD_SPOOF_CHANNEL_ID_INSTAGRAM",
+        "DISCORD_SPOOF_CHANNEL_ID_THREADS",
+    ):
         val = os.getenv(env_var, "").strip()
         if val:
             try:
                 channel_ids.append(int(val))
             except ValueError:
                 pass
+    # Hardcoded fallback : canal spoof-photos du serveur Threads
+    # (Geelark et Instagram sont via env vars Railway)
+    threads_spoof = 1502037917160177926
+    if threads_spoof not in channel_ids:
+        channel_ids.append(threads_spoof)
     return channel_ids
 
 

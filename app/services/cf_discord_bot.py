@@ -59,15 +59,16 @@ def _get_respoof_channel_ids() -> List[int]:
     """
     Liste de canaux où /respoof fonctionne.
     Si la variable d'env CF_RESPOOF_CHANNEL_IDS n'est pas définie,
-    fallback sur les IDs hardcodés (Geelark + Instagram + Threads).
+    fallback sur les IDs hardcodés (Geelark + Instagram).
+    NB : Threads n'utilise PAS /respoof — il a son propre canal auto-spoof
+    (cf discord_bot._get_spoof_channel_ids).
     """
     raw = os.environ.get("CF_RESPOOF_CHANNEL_IDS", "").strip()
     if not raw:
-        # Fallback hardcodé sur les canaux respoof configurés
+        # Fallback hardcodé sur les 2 canaux respoof configurés
         return [
             1497103659094380625,  # Geelark
             1497103579633418280,  # Instagram
-            1502037917160177926,  # Threads (photos spoof)
         ]
     out: List[int] = []
     for piece in raw.replace(";", ",").split(","):
