@@ -218,6 +218,36 @@ def respoof_video(
     }
 
 
+def _probe_audio_sample_rate(path: str) -> int:
+    """
+    Retourne le sample rate (Hz) du 1er stream audio via ffprobe.
+    Default 44100 si pas d'audio ou probe échoue.
+
+    Sans ça, asetrate=44100*pitch assume une source 44.1 kHz, alors que les
+    vidéos modernes (iPhone, TikTok, Insta) sont en 48 kHz → pitch effectif
+    faussé (~7% au lieu du ±1.5% prévu).
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=sample_rate",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                path,
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+        val = result.stdout.strip()
+        if val and val.isdigit():
+            sr = int(val)
+            if sr > 0:
+                return sr
+    except Exception:
+        pass
+    return 44100
+
+
 def _build_respoof_ffmpeg_cmd(
     input_path: str,
     output_path: str,
@@ -225,9 +255,12 @@ def _build_respoof_ffmpeg_cmd(
     bitrate_kbps: int,
     audio_pitch: float,
 ) -> list:
+    # Probe le sample rate RÉEL de la source pour calibrer asetrate.
+    # Sources iPhone/TikTok/Insta = souvent 48 kHz, pas 44.1.
+    source_sr = _probe_audio_sample_rate(input_path)
     afilter = (
-        f"asetrate=44100*{audio_pitch:.6f},"
-        f"aresample=44100,"
+        f"asetrate={source_sr}*{audio_pitch:.6f},"
+        f"aresample={source_sr},"
         f"atempo={1.0/audio_pitch:.6f}"
     )
     cmd = [

@@ -286,19 +286,54 @@ def _build_video_spoof_chain(params: Dict[str, Optional[float]]) -> List[str]:
     return chain
 
 
-def _build_audio_spoof_filter(params: Dict[str, Optional[float]]) -> Optional[str]:
+def _get_audio_sample_rate(path: str) -> int:
+    """
+    Retourne le sample rate (Hz) du 1er stream audio via ffprobe.
+    Default 44100 si pas d'audio ou probe échoue.
+
+    Important : sans ça, asetrate=44100*pitch assume une source 44.1 kHz, alors
+    que 90% des vidéos modernes (iPhone, TikTok, Insta) sont en 48 kHz. Résultat :
+    le pitch shift ±1.5% prévu devient ±7% réel (audible) et désynchro tempo.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=sample_rate",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                path,
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+        val = result.stdout.strip()
+        if val and val.isdigit():
+            sr = int(val)
+            if sr > 0:
+                return sr
+    except Exception:
+        pass
+    return 44100
+
+
+def _build_audio_spoof_filter(
+    params: Dict[str, Optional[float]],
+    source_sample_rate: int = 44100,
+) -> Optional[str]:
     """
     Filtre audio pour spoof : changement de pitch (anti-fingerprint Insta/TikTok)
     + compensation tempo pour garder la durée correcte.
 
     Stratégie :
-    - asetrate=44100*pitch → change la fréquence d'échantillonnage = change pitch + tempo
-    - aresample=44100 → re-sample pour rester en 44100 Hz (compatibilité)
-    - atempo=speed/pitch → compense le changement de tempo pour viser la vitesse voulue
-                           (speed = ratio de vitesse vidéo qu'on veut matcher)
+    - asetrate=source_sr*pitch → change la fréquence d'échantillonnage = pitch + tempo
+    - aresample=source_sr → re-sample pour rester au sample rate d'origine
+    - atempo=speed/pitch → compense le changement de tempo pour atteindre la vitesse voulue
 
-    Résultat : audio avec pitch décalé de ±1.5% (imperceptible humain)
-    qui casse les hash audio Insta/TikTok, tout en gardant la durée correcte.
+    Résultat : audio avec pitch décalé de ±1.5% (imperceptible humain) qui casse
+    les hash audio Insta/TikTok, tout en gardant la durée correcte.
+
+    IMPORTANT : asetrate doit utiliser le sample rate RÉEL de la source (probe
+    via ffprobe). Sinon le pitch effectif est faussé proportionnellement.
     """
     speed = params.get("speed") or 1.0
     pitch = params.get("audio_pitch") or 1.0
@@ -311,13 +346,12 @@ def _build_audio_spoof_filter(params: Dict[str, Optional[float]]) -> Optional[st
     if abs(pitch - 1.0) < 0.001:
         return f"atempo={speed}"
 
-    # Pitch shift via asetrate, puis atempo pour compenser et atteindre la vitesse cible
-    sample_rate = 44100
-    new_rate = int(sample_rate * pitch)
+    # Pitch shift via asetrate basé sur le sample rate RÉEL de la source.
+    new_rate = int(source_sample_rate * pitch)
     # tempo final = speed / pitch (car asetrate a déjà appliqué un facteur de pitch)
     tempo_compensation = speed / pitch
     # atempo n'accepte que [0.5, 2.0] par étape, mais notre range est très petit donc OK
-    return f"asetrate={new_rate},aresample={sample_rate},atempo={tempo_compensation:.6f}"
+    return f"asetrate={new_rate},aresample={source_sample_rate},atempo={tempo_compensation:.6f}"
 
 
 def _escape_drawtext(text: str) -> str:
@@ -602,14 +636,22 @@ def _build_ffmpeg_cmd(
         filter_complex_parts = [scale_chain]
         out_label = "[vid]"
 
-    # ===== Audio filter pour speed (atempo) =====
-    af = _build_audio_spoof_filter(spoof_params or {}) if spoof_params else None
+    # ===== Audio filter pour speed (atempo) + pitch (asetrate) =====
+    # On probe le sample rate RÉEL du fichier audio source (vidéo ou musique)
+    # pour calibrer asetrate. Sans ça on assume 44100 alors que les sources
+    # iPhone/TikTok/Insta sont en 48000 → pitch shift faussé.
+    audio_source_path = music_path if has_music else video_path
+    audio_sr = _get_audio_sample_rate(audio_source_path) if spoof_params else 44100
+    af = (
+        _build_audio_spoof_filter(spoof_params or {}, source_sample_rate=audio_sr)
+        if spoof_params else None
+    )
     if af and not has_music:
-        # Applique atempo à l'audio source si présent
+        # Applique atempo + pitch à l'audio source vidéo
         filter_complex_parts.append(f"[0:a]{af}[aout]")
         audio_out_label = "[aout]"
     elif af and has_music:
-        # Applique atempo à la musique source
+        # Applique atempo + pitch à la musique source
         filter_complex_parts.append(f"[1:a]{af}[aout]")
         audio_out_label = "[aout]"
     else:
