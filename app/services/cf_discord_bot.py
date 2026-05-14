@@ -1040,9 +1040,32 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 ephemeral=True,
             )
             return
-        # Filtre selon les rôles du VA
-        my_ids = set(_allowed_models_for_member(interaction.user))
-        my_models = [m for m in all_models if m["id"] in my_ids]
+
+        # Filtre selon les rôles du VA.
+        # _allowed_models_for_member retourne :
+        # - Pour admins : tous les DB ids (vue complète)
+        # - Pour VAs : les numéros tirés des rôles "IDX" (user-facing, match
+        #   les labels qu'ils voient sur le site, pas les DB ids)
+        # Pour les VAs, on résout chaque numéro vers son DB id réel via label
+        # (sinon rôle "ID3" cherche DB id 3 qui peut être un trou et le VA
+        # se retrouve sans modèle alors qu'il devrait voir celui labelé "ID 3").
+        my_numbers = set(_allowed_models_for_member(interaction.user))
+        is_admin_user = False
+        try:
+            is_admin_user = bool(interaction.user.guild_permissions.administrator)
+        except Exception:
+            pass
+
+        if is_admin_user:
+            my_db_ids = my_numbers
+        else:
+            my_db_ids = set()
+            for num in my_numbers:
+                resolved = cf_storage.get_model_by_label_number(num)
+                if resolved:
+                    my_db_ids.add(int(resolved["id"]))
+
+        my_models = [m for m in all_models if m["id"] in my_db_ids]
 
         if not my_models:
             await interaction.response.send_message(
@@ -1054,7 +1077,9 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         lines = []
         for m in my_models:
             n_videos = len(cf_storage.list_videos(model_id=m["id"]))
-            lines.append(f"• **ID {m['id']}** — {m['label']} ({n_videos} vidéos)")
+            # Affiche juste le label (= ce que le VA voit sur le site),
+            # pas le DB id qui peut être décalé et créer de la confusion.
+            lines.append(f"• **{m['label']}** ({n_videos} vidéos)")
         msg = "**📋 Tes modèles autorisés :**\n" + "\n".join(lines)
         msg += "\n\nUtilise `/request quantite:50 modele:1`"
         await interaction.response.send_message(msg, ephemeral=True)
