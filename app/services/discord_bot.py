@@ -66,7 +66,7 @@ def _get_onboarding_channel_ids() -> List[int]:
                 pass
     # Hardcoded fallback : canal gmail-drive du serveur Threads
     # (Geelark et Instagram sont via env vars Railway)
-    threads_gmail_drive = 1504616895112810577
+    threads_gmail_drive = 1504618896131358832
     if threads_gmail_drive not in channel_ids:
         channel_ids.append(threads_gmail_drive)
     return channel_ids
