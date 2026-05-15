@@ -33,3 +33,7 @@ jobs:
           # ou bypassent via leur propre logique de fallback.
           PYTHONDONTWRITEBYTECODE: "1"
         run: pytest tests/ -v
+
+      - name: Run mypy (informational, ne bloque pas le CI)
+        continue-on-error: true
+        run: mypy app/ || true
