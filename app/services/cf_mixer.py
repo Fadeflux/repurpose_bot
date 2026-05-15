@@ -207,6 +207,14 @@ try:
 except Exception as _stats_err:
     logger.warning(f"Failed to start weekly stats scheduler: {_stats_err}")
 
+# Démarre le scheduler d'anomaly detection (volumes 3x usual → admin alert).
+# Désactivable via CF_ANOMALY_CHECK_ENABLED=0 dans Railway.
+try:
+    from app.services.cf_weekly_stats import _start_anomaly_check_scheduler as _start_anom
+    _start_anom()
+except Exception as _anom_err:
+    logger.warning(f"Failed to start anomaly check scheduler: {_anom_err}")
+
 
 # ===== CONCURRENCE LOCK =====
 # Limite à 1 SEUL mix en parallèle (évite OOM kill quand 2+ VAs lancent /request ensemble).

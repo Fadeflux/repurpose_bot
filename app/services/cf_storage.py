@@ -1465,3 +1465,105 @@ def cleanup_orphan_accounts(days: int = 30, dry_run: bool = False) -> Dict[str, 
     except Exception as e:
         logger.error(f"cleanup_orphan_accounts failed: {e}")
         return {"deleted": 0, "candidates": [], "dry_run": dry_run, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# DÉTECTION D'ANOMALIES DE VOLUME (VA qui post 3x+ son habitude)
+# ---------------------------------------------------------------------------
+def get_va_volume_anomalies(
+    multiplier_threshold: float = 3.0,
+    min_today_videos: int = 50,
+    baseline_window_days: int = 14,
+) -> List[Dict[str, Any]]:
+    """
+    Retourne les VAs dont le volume des dernières 24h dépasse
+    `multiplier_threshold` × leur moyenne journalière des `baseline_window_days`
+    derniers jours (en excluant les 24h actuelles).
+
+    Filtre min_today_videos : on ignore les "petits" jours pour éviter le bruit
+    (ex: VA qui passe de 5 à 20 vidéos = 4x mais pas un signal).
+
+    Use case typique :
+    - VA habituellement à 50 vidéos/jour → soudain 200 vidéos en 24h
+    - Compte compromis, panique, ou VA en train de spammer pour mauvaises raisons
+    - Pinger l'admin pour qu'il check rapidement
+    """
+    if not is_db_enabled():
+        return []
+    sql = """
+        WITH today_volumes AS (
+            SELECT
+                va_name,
+                COALESCE(SUM(videos_uploaded), 0) AS today_videos,
+                COUNT(*) AS today_batches
+            FROM cf_batches
+            WHERE va_name != ''
+                AND created_at >= NOW() - INTERVAL '24 hours'
+            GROUP BY va_name
+            HAVING COALESCE(SUM(videos_uploaded), 0) >= %s
+        ),
+        baseline_per_day AS (
+            SELECT
+                va_name,
+                DATE_TRUNC('day', created_at) AS day,
+                COALESCE(SUM(videos_uploaded), 0) AS day_videos
+            FROM cf_batches
+            WHERE va_name != ''
+                AND created_at < NOW() - INTERVAL '24 hours'
+                AND created_at >= NOW() - (%s || ' days')::INTERVAL
+            GROUP BY va_name, DATE_TRUNC('day', created_at)
+        ),
+        baseline_avg AS (
+            SELECT va_name, AVG(day_videos) AS avg_daily
+            FROM baseline_per_day
+            GROUP BY va_name
+        )
+        SELECT
+            t.va_name,
+            t.today_videos,
+            t.today_batches,
+            COALESCE(b.avg_daily, 0) AS baseline_avg
+        FROM today_volumes t
+        LEFT JOIN baseline_avg b ON b.va_name = t.va_name
+        WHERE
+            -- Anomalie si today > threshold × baseline (et baseline > 0)
+            (COALESCE(b.avg_daily, 0) > 0
+             AND t.today_videos > %s * COALESCE(b.avg_daily, 1))
+            -- OU si baseline = 0 (= VA jamais vu avant) ET today très haut
+            OR (COALESCE(b.avg_daily, 0) = 0 AND t.today_videos > %s)
+        ORDER BY t.today_videos DESC
+    """
+    # Threshold pour les VAs sans historique (baseline=0) : 2x le min_today
+    new_va_threshold = max(min_today_videos * 2, 100)
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql,
+                    (
+                        min_today_videos,
+                        str(baseline_window_days),
+                        multiplier_threshold,
+                        new_va_threshold,
+                    ),
+                )
+                rows = cur.fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            today = int(r[1])
+            baseline = float(r[3] or 0)
+            ratio = (today / baseline) if baseline > 0 else None
+            out.append(
+                {
+                    "va_name": r[0],
+                    "today_videos": today,
+                    "today_batches": int(r[2]),
+                    "baseline_avg": round(baseline, 1),
+                    "ratio": round(ratio, 2) if ratio else None,
+                    "is_new_va": baseline == 0,
+                }
+            )
+        return out
+    except Exception as e:
+        logger.error(f"get_va_volume_anomalies failed: {e}")
+        return []

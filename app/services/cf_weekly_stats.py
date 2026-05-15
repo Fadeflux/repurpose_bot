@@ -244,3 +244,86 @@ def _start_weekly_stats_scheduler() -> None:
         logger.info("✅ Weekly stats scheduler started (lundis 09:00 UTC)")
     except Exception as e:
         logger.warning(f"Failed to start weekly stats scheduler: {e}")
+
+
+# ============================================================================
+# ANOMALY DETECTION : check volume 3x usual toutes les 4h
+# ============================================================================
+async def check_and_alert_anomalies() -> int:
+    """
+    Vérifie les anomalies de volume et envoie un admin alert si y en a.
+    Retourne le nombre d'anomalies détectées (0 = tout normal).
+    """
+    if not is_admin_webhook_enabled():
+        return 0
+    try:
+        anomalies = cf_storage.get_va_volume_anomalies(
+            multiplier_threshold=float(os.environ.get("CF_ANOMALY_MULTIPLIER", "3")),
+            min_today_videos=int(os.environ.get("CF_ANOMALY_MIN_VIDEOS", "50")),
+            baseline_window_days=int(os.environ.get("CF_ANOMALY_BASELINE_DAYS", "14")),
+        )
+    except Exception as e:
+        logger.warning(f"check_and_alert_anomalies query failed: {e}")
+        return 0
+
+    if not anomalies:
+        return 0
+
+    lines = ["**⚠️ Volumes anormaux sur les dernières 24h :**\n"]
+    for a in anomalies:
+        if a["is_new_va"]:
+            lines.append(
+                f"• `{a['va_name']}` (NOUVEAU VA) — **{a['today_videos']}** vidéos "
+                f"en {a['today_batches']} batchs"
+            )
+        else:
+            lines.append(
+                f"• `{a['va_name']}` — **{a['today_videos']}** vidéos "
+                f"(vs avg {a['baseline_avg']}/jour → **×{a['ratio']}**)"
+            )
+
+    lines.append(
+        "\n_Check rapide : compte compromis ? VA qui spam ? Panique ? "
+        "Ou juste une grosse journée légitime ?_"
+    )
+    await send_admin_alert(
+        title=f"Volume anormal détecté ({len(anomalies)} VA)",
+        message="\n".join(lines),
+        level="warning",
+    )
+    return len(anomalies)
+
+
+def _start_anomaly_check_scheduler() -> None:
+    """
+    Daemon qui check les anomalies toutes les 4h.
+    Désactivable via CF_ANOMALY_CHECK_ENABLED=0.
+    """
+    if os.environ.get("CF_ANOMALY_CHECK_ENABLED", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+        "off",
+    ):
+        logger.info("Anomaly check désactivé (CF_ANOMALY_CHECK_ENABLED=0)")
+        return
+
+    def _loop():
+        # Premier passage 30 min après boot (laisse les batchs du moment se logger)
+        _time.sleep(30 * 60)
+        interval_seconds = 4 * 3600  # 4h
+        while True:
+            try:
+                n = asyncio.run(check_and_alert_anomalies())
+                if n > 0:
+                    logger.info(f"🚨 Anomaly check: {n} anomalies envoyées à l'admin")
+            except Exception as e:
+                logger.warning(f"Anomaly check loop error: {e}")
+            _time.sleep(interval_seconds)
+
+    try:
+        t = threading.Thread(target=_loop, daemon=True, name="cf-anomaly-check")
+        t.start()
+        logger.info("✅ Anomaly check scheduler started (toutes les 4h)")
+    except Exception as e:
+        logger.warning(f"Failed to start anomaly check scheduler: {e}")
