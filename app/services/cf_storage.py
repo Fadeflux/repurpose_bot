@@ -1347,3 +1347,90 @@ def update_account_ios(account_id: int, ios_version: str) -> bool:
     except Exception as e:
         logger.error(f"update_account_ios failed: {e}")
         return False
+
+
+# ---------------------------------------------------------------------------
+# CLEANUP COMPTES ORPHELINS
+# ---------------------------------------------------------------------------
+def cleanup_orphan_accounts(days: int = 30, dry_run: bool = False) -> Dict[str, Any]:
+    """
+    Supprime les comptes cf_accounts qui n'ont eu AUCUN batch dans les `days`
+    derniers jours ET dont la création remonte à > `days` jours.
+
+    Logique conservative (pas de faux positifs) :
+    - created_at < NOW() - days → le compte a eu le temps d'être utilisé
+    - Aucune entrée dans cf_batches avec ce username dans les `days` derniers jours
+
+    Cas couverts :
+    - Typos VA (ex: créé "sara_official_226" au lieu de "sara_official_2026")
+    - Comptes test qui n'ont jamais servi
+    - Comptes abandonnés (VA parti, modèle obsolète, etc.)
+
+    Cas NON touchés (sûrs) :
+    - Comptes utilisés récemment (batch < days jours)
+    - Comptes créés très récemment (< days jours, peut-être pas encore utilisés)
+
+    Args:
+        days: Seuil en jours pour la création + le dernier batch (default 30)
+        dry_run: Si True, liste juste les comptes éligibles sans rien supprimer
+
+    Returns:
+        Dict avec keys: deleted (int), candidates (list[dict]), dry_run (bool)
+    """
+    if not is_db_enabled():
+        return {"deleted": 0, "candidates": [], "dry_run": dry_run, "error": "db_disabled"}
+
+    select_sql = """
+        SELECT id, username, model_id, va_name, created_at
+        FROM cf_accounts
+        WHERE created_at < NOW() - (%s || ' days')::INTERVAL
+        AND NOT EXISTS (
+            SELECT 1 FROM cf_batches
+            WHERE cf_batches.account_username = cf_accounts.username
+            AND cf_batches.created_at > NOW() - (%s || ' days')::INTERVAL
+        )
+    """
+    delete_sql = """
+        DELETE FROM cf_accounts
+        WHERE created_at < NOW() - (%s || ' days')::INTERVAL
+        AND NOT EXISTS (
+            SELECT 1 FROM cf_batches
+            WHERE cf_batches.account_username = cf_accounts.username
+            AND cf_batches.created_at > NOW() - (%s || ' days')::INTERVAL
+        )
+    """
+
+    try:
+        candidates: List[Dict[str, Any]] = []
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(select_sql, (str(days), str(days)))
+                rows = cur.fetchall()
+                for r in rows:
+                    candidates.append({
+                        "id": int(r[0]),
+                        "username": r[1],
+                        "model_id": int(r[2]) if r[2] is not None else None,
+                        "va_name": r[3] or "",
+                        "created_at": r[4].isoformat() if r[4] else None,
+                    })
+
+                deleted = 0
+                if not dry_run and candidates:
+                    cur.execute(delete_sql, (str(days), str(days)))
+                    deleted = cur.rowcount
+            conn.commit()
+
+        logger.info(
+            f"cleanup_orphan_accounts: {len(candidates)} candidats, "
+            f"{deleted} supprimés (dry_run={dry_run}, seuil={days}j)"
+        )
+        return {
+            "deleted": deleted,
+            "candidates": candidates,
+            "dry_run": dry_run,
+            "threshold_days": days,
+        }
+    except Exception as e:
+        logger.error(f"cleanup_orphan_accounts failed: {e}")
+        return {"deleted": 0, "candidates": [], "dry_run": dry_run, "error": str(e)}

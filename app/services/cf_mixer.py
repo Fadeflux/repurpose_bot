@@ -140,6 +140,65 @@ _startup_cleanup()
 _start_periodic_output_cleanup()
 
 
+# ============================================================================
+# CLEANUP QUOTIDIEN DES COMPTES ORPHELINS (cf_accounts)
+# ============================================================================
+def _start_periodic_orphan_accounts_cleanup() -> None:
+    """
+    Thread daemon qui supprime les comptes cf_accounts sans batch depuis 30j.
+
+    Pourquoi : à chaque /request, si le username n'existe pas, le bot crée
+    une nouvelle entrée cf_accounts. Sur le long terme, les typos + comptes
+    test + comptes abandonnés font gonfler la table inutilement.
+
+    Logique safe : on supprime seulement les comptes créés depuis > 30j ET
+    qui n'ont eu aucun batch dans les 30 derniers jours. Si un VA revient
+    sur un vieux compte, il sera juste re-créé (random device + GPS) — pas
+    de perte fonctionnelle.
+
+    Cadence : 1× toutes les 24h. Premier passage : 1h après le démarrage
+    (laisse le temps au bot de se stabiliser après un deploy).
+    """
+    import threading
+    import time as _time
+
+    def _loop():
+        # Attend 1h avant le premier passage
+        _time.sleep(60 * 60)
+        while True:
+            try:
+                from app.services import cf_storage as _cfs
+                # Seuil configurable via env var (default 30j)
+                try:
+                    threshold = int(os.environ.get("CF_ORPHAN_ACCOUNTS_DAYS", "30"))
+                except Exception:
+                    threshold = 30
+                if threshold <= 0:
+                    # 0 ou négatif = cleanup désactivé
+                    _time.sleep(24 * 60 * 60)
+                    continue
+                result = _cfs.cleanup_orphan_accounts(days=threshold, dry_run=False)
+                deleted = result.get("deleted", 0)
+                if deleted > 0:
+                    logger.info(
+                        f"🧹 [cf_mixer daily] {deleted} comptes orphelins supprimés "
+                        f"(seuil {threshold}j sans batch)"
+                    )
+            except Exception as e:
+                logger.warning(f"Orphan accounts cleanup error: {e}")
+            _time.sleep(24 * 60 * 60)  # 24h
+
+    try:
+        t = threading.Thread(target=_loop, daemon=True, name="cf-orphan-accounts-cleanup")
+        t.start()
+        logger.info("✅ Periodic orphan accounts cleanup thread started (daily)")
+    except Exception as e:
+        logger.warning(f"Failed to start orphan accounts cleanup: {e}")
+
+
+_start_periodic_orphan_accounts_cleanup()
+
+
 # ===== CONCURRENCE LOCK =====
 # Limite à 1 SEUL mix en parallèle (évite OOM kill quand 2+ VAs lancent /request ensemble).
 # Les autres mix attendent leur tour dans la queue.
