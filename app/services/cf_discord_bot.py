@@ -1139,6 +1139,63 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         await interaction.response.send_message(msg, ephemeral=True)
 
     @bot.tree.command(
+        name="stats",
+        description="[Admin] Envoie le récap hebdo des batchs ClipFusion dans le webhook admin",
+    )
+    @app_commands.describe(
+        jours="Période en jours (défaut 7). Ex: 30 pour le mois.",
+    )
+    async def stats_cmd(
+        interaction: "discord.Interaction",
+        jours: int = 7,
+    ):
+        # Admin-only
+        if not _is_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ Cette commande est réservée aux admins.",
+                ephemeral=True,
+            )
+            return
+        if jours < 1 or jours > 365:
+            await interaction.response.send_message(
+                "❌ Période invalide (1-365 jours).",
+                ephemeral=True,
+            )
+            return
+
+        # Defer parce que query DB + envoi webhook
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            from app.services import cf_weekly_stats
+            from app.services.discord_service import is_admin_webhook_enabled
+            if not is_admin_webhook_enabled():
+                await interaction.followup.send(
+                    "❌ `DISCORD_ADMIN_WEBHOOK_URL` n'est pas configuré côté Railway.\n"
+                    "Ajoute la variable pour recevoir les stats dans ton canal admin.",
+                    ephemeral=True,
+                )
+                return
+
+            sent = await cf_weekly_stats.send_weekly_stats(days=jours)
+            if sent:
+                await interaction.followup.send(
+                    f"✅ Stats des {jours} derniers jours envoyées dans le canal admin.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    f"⚠️ L'envoi a échoué (check les logs Railway).",
+                    ephemeral=True,
+                )
+        except Exception as e:
+            logger.exception(f"/stats error: {e}")
+            await interaction.followup.send(
+                f"❌ Erreur : `{type(e).__name__}: {str(e)[:200]}`",
+                ephemeral=True,
+            )
+
+    @bot.tree.command(
         name="respoof",
         description="Respoof une photo/vidéo existante avec le device + GPS lockés d'un compte",
     )
