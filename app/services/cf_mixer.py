@@ -1508,7 +1508,45 @@ def mix_batch_stream(
                             if account and window_label and window_label in subfolder_ids:
                                 target_folder = subfolder_ids[window_label]
                             yield {"type": "log", "level": "RUN", "message": f"📤 ({i}/{len(output_metas)}) Upload {local_path.name}"}
-                            up = drive_service.upload_file(local_path, target_folder, mime_type="video/mp4")
+                            # Retry auto avec backoff 2s/4s/8s pour les uploads Drive
+                            # qui foirent (timeout réseau, quota temporaire, etc.).
+                            # Sans retry, un fichier perdu = batch incomplet en silence.
+                            up = None
+                            _drive_attempts = 0
+                            for _drive_attempts in range(1, 4):
+                                try:
+                                    up = drive_service.upload_file(
+                                        local_path, target_folder, mime_type="video/mp4"
+                                    )
+                                except Exception as _drive_err:
+                                    up = None
+                                    yield {
+                                        "type": "log", "level": "WARN",
+                                        "message": (
+                                            f"Drive upload exception (attempt "
+                                            f"{_drive_attempts}/3): {_drive_err}"
+                                        ),
+                                    }
+                                if up:
+                                    if _drive_attempts > 1:
+                                        yield {
+                                            "type": "log", "level": "INFO",
+                                            "message": (
+                                                f"✓ Drive upload OK à la tentative "
+                                                f"{_drive_attempts}/3 : {local_path.name}"
+                                            ),
+                                        }
+                                    break
+                                if _drive_attempts < 3:
+                                    _wait = 2 ** _drive_attempts  # 2s, 4s
+                                    yield {
+                                        "type": "log", "level": "WARN",
+                                        "message": (
+                                            f"Drive upload échec (attempt {_drive_attempts}/3), "
+                                            f"retry dans {_wait}s : {local_path.name}"
+                                        ),
+                                    }
+                                    time.sleep(_wait)
                             if up:
                                 m["drive_id"] = up.get("id")
                                 m["drive_url"] = up.get("webViewLink", "")
