@@ -215,6 +215,9 @@ def _iphone_metadata() -> Dict[str, str]:
         "com.apple.quicktime.location.ISO6709": location_str,
         "com.apple.quicktime.location.accuracy.horizontal": f"{random.uniform(4.5, 15.0):.6f}",
 
+        # Battery level (random plausible 15-95%)
+        "com.apple.quicktime.battery_level": _random_battery_level(),
+
         # Dates
         "creation_time": timings["format_time"],
         "date": timings["format_time"][:10],
@@ -369,6 +372,16 @@ def _android_metadata_fixed(model_code: str) -> Dict[str, str]:
     return _android_metadata()  # fallback
 
 
+def _random_battery_level() -> str:
+    """
+    Génère un niveau de batterie iPhone plausible (en % format string).
+    Range 0.15-0.95 = entre 15% et 95% pour réalisme (les iPhones ne sont
+    quasi jamais à 0% ou 100% au moment d'un recording).
+    Format Apple-style : float entre 0.0 et 1.0 avec 6 décimales.
+    """
+    return f"{random.uniform(0.15, 0.95):.6f}"
+
+
 def _iphone_metadata_impl(model: str, ios_versions: list) -> Dict[str, str]:
     """Version factorisée du generator iPhone."""
     ios_version = random.choice(ios_versions)
@@ -393,6 +406,9 @@ def _iphone_metadata_impl(model: str, ios_versions: list) -> Dict[str, str]:
         "location-eng": location_str,
         "com.apple.quicktime.location.ISO6709": location_str,
         "com.apple.quicktime.location.accuracy.horizontal": f"{random.uniform(4.5, 15.0):.6f}",
+        # Battery level : random plausible 15-95% (les iPhones recordent
+        # rarement à 0% ou 100%). Ajoute un datapoint anti-fingerprint.
+        "com.apple.quicktime.battery_level": _random_battery_level(),
         "creation_time": timings["format_time"],
         "date": timings["format_time"][:10],
         "com.apple.quicktime.creationdate": timings["apple_creationdate"],
