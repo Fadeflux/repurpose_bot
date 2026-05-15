@@ -1478,8 +1478,15 @@ def create_account(
     if gps_lat is None or gps_lng is None or not gps_city:
         city = _r.choice(US_CITIES_GPS)
         gps_city = city[0]
-        gps_lat = city[1]
-        gps_lng = city[2]
+        # Jitter ±0.015° lat (≈1.6km) et ±0.020° lng (≈1.7km à 40°N) autour du
+        # centre-ville. Chaque compte reçoit un point unique dans le downtown.
+        # Sans ça, TOUS les comptes Miami avaient la même coord exacte
+        # (25.7617, -80.1918) → fingerprint évident côté Insta.
+        gps_lat = city[1] + _r.uniform(-0.015, 0.015)
+        gps_lng = city[2] + _r.uniform(-0.020, 0.020)
+        # Arrondi 6 décimales (précision GPS iPhone réelle ≈ 5 décimales)
+        gps_lat = round(gps_lat, 6)
+        gps_lng = round(gps_lng, 6)
         # Note : altitude (city[3]) pas stockée en DB ; lookup dynamique via get_city_altitude()
 
     try:
