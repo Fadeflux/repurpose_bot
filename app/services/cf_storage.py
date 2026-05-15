@@ -1346,6 +1346,55 @@ def archive_accounts_for_va(
         return {"archived": 0, "error": str(e)}
 
 
+def get_account_age_and_today_volume(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Retourne :
+    - age_days : âge du compte (jours depuis created_at)
+    - today_videos : nb vidéos uploaded ces 24 dernières heures pour ce compte
+    Used par l'account aging strategy : un nouveau compte ne doit pas spammer
+    50 vidéos le jour 1 (= pattern bot évident côté Insta).
+    """
+    if not is_db_enabled() or not username:
+        return None
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                # Age compte
+                cur.execute(
+                    "SELECT created_at FROM cf_accounts WHERE username = %s "
+                    "ORDER BY created_at ASC LIMIT 1",
+                    (username.strip(),),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                created_at = row[0]
+                age_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
+                age_days = int(age_seconds // 86400)
+
+                # Volume aujourd'hui
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(videos_uploaded), 0)
+                    FROM cf_batches
+                    WHERE account_username = %s
+                      AND created_at >= NOW() - INTERVAL '24 hours'
+                    """,
+                    (username.strip(),),
+                )
+                today_row = cur.fetchone() or (0,)
+                today_videos = int(today_row[0])
+
+        return {
+            "age_days": age_days,
+            "today_videos": today_videos,
+            "created_at": created_at.isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"get_account_age_and_today_volume failed: {e}")
+        return None
+
+
 def get_account_stats(username: str) -> Optional[Dict[str, Any]]:
     """
     Retourne les stats agrégées d'un compte : total batches, total vidéos

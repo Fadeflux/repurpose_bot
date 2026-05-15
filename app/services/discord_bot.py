@@ -263,6 +263,14 @@ def _build_bot() -> commands.Bot:
         except Exception as e:
             logger.warning(f"Tree sync échoué: {e}")
 
+        # Démarre la mise à jour automatique du statut Discord (toutes les 30s)
+        # Affiche dans le member list : "Mixing · 3 en attente" etc.
+        try:
+            asyncio.create_task(_presence_updater_loop(bot))
+            logger.info("✅ Bot presence updater démarré (refresh 30s)")
+        except Exception as e:
+            logger.warning(f"Presence updater n'a pas pu démarrer: {e}")
+
     @bot.event
     async def on_message(message: discord.Message):
         # Ignore les messages du bot lui-même
@@ -545,6 +553,41 @@ async def send_batch_notification_via_bot(
     except Exception as e:
         logger.exception(f"Erreur envoi notif batch via bot: {e}")
         return False
+
+
+async def _presence_updater_loop(bot: "discord.Client") -> None:
+    """
+    Met à jour le statut "Activity" du bot Discord toutes les 30s selon
+    l'état de la queue ClipFusion. Visible dans la member list + sur le
+    profil du bot. Donne une vision live de la charge sans avoir à
+    taper /status.
+    """
+    import asyncio as _asyncio
+    while True:
+        try:
+            # Import lazy : évite la dépendance circulaire au boot du module
+            from app.services.cf_discord_bot import _current, _pending  # type: ignore
+            in_queue = len(_pending)
+            if _current is not None:
+                if in_queue > 0:
+                    text = f"🎬 Mixing · {in_queue} en attente"
+                else:
+                    text = "🎬 Mixing 1 batch"
+                status = discord.Status.online
+            elif in_queue > 0:
+                text = f"⏳ {in_queue} batchs en attente"
+                status = discord.Status.online
+            else:
+                text = "💤 Idle · /request pour démarrer"
+                status = discord.Status.idle
+            activity = discord.Activity(
+                type=discord.ActivityType.watching,
+                name=text,
+            )
+            await bot.change_presence(activity=activity, status=status)
+        except Exception as e:
+            logger.warning(f"Presence update échoué: {e}")
+        await _asyncio.sleep(30)
 
 
 async def notify_va_drive_ready(
