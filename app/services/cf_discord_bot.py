@@ -636,6 +636,41 @@ def _allowed_models_for_member(member: "discord.Member") -> List[int]:
         return []
 
 
+if DISCORD_AVAILABLE:
+    class _BigBatchConfirmView(discord.ui.View):
+        """
+        View avec boutons ✅/❌ pour confirmer un gros batch (>= seuil).
+        Évite les misclick à 50 vidéos.
+
+        Timeout = 30s par défaut. Si pas de réponse, confirmed reste None
+        (l'appelant doit le traiter comme "annulé").
+        """
+
+        def __init__(self, timeout: float = 30.0):
+            super().__init__(timeout=timeout)
+            self.confirmed: Optional[bool] = None
+
+        @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.green)
+        async def confirm_btn(
+            self,
+            interaction: "discord.Interaction",
+            button: "discord.ui.Button",
+        ):
+            await interaction.response.defer()
+            self.confirmed = True
+            self.stop()
+
+        @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.red)
+        async def cancel_btn(
+            self,
+            interaction: "discord.Interaction",
+            button: "discord.ui.Button",
+        ):
+            await interaction.response.defer()
+            self.confirmed = False
+            self.stop()
+
+
 def install_clipfusion_commands(bot: "commands.Bot") -> None:
     """
     À appeler une fois le bot construit (avant tree.sync). Ajoute /request
@@ -721,6 +756,49 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 ephemeral=True,
             )
             return
+
+        # === CONFIRMATION pour les gros batchs ===
+        # Évite les misclicks à 50 vidéos : au-delà du seuil, on demande une
+        # confirmation explicite via boutons. Configurable via CF_CONFIRM_THRESHOLD.
+        try:
+            confirm_threshold = int(os.environ.get("CF_CONFIRM_THRESHOLD", "30"))
+        except Exception:
+            confirm_threshold = 30
+        if confirm_threshold > 0 and quantite >= confirm_threshold:
+            confirm_view = _BigBatchConfirmView(timeout=30.0)
+            confirm_msg = await interaction.followup.send(
+                f"⚠️ Tu demandes **{quantite} vidéos**. C'est un gros batch.\n"
+                f"📦 Modèle : `ID{modele}` · 👤 Compte : `@{clean_username}`\n\n"
+                f"Confirme dans 30s sinon la demande s'annule.",
+                view=confirm_view,
+                ephemeral=True,
+            )
+            await confirm_view.wait()
+            if confirm_view.confirmed is None:
+                try:
+                    await confirm_msg.edit(
+                        content=f"⏱️ Confirmation timeout (30s). Batch de **{quantite}** vidéos annulé.",
+                        view=None,
+                    )
+                except Exception:
+                    pass
+                return
+            if not confirm_view.confirmed:
+                try:
+                    await confirm_msg.edit(
+                        content=f"❌ Batch de **{quantite}** vidéos annulé.",
+                        view=None,
+                    )
+                except Exception:
+                    pass
+                return
+            try:
+                await confirm_msg.edit(
+                    content=f"✅ Confirmé, lancement de **{quantite}** vidéos...",
+                    view=None,
+                )
+            except Exception:
+                pass
 
         # === CHECKS DB EN PARALLÈLE (gain ~500ms sur Railway) ===
         # 4 lectures DB indépendantes (email, model, rate limit, account existant).
@@ -1161,6 +1239,111 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             for i, p in enumerate(_pending[:10], 1):
                 msg += f"{i}. {p.user_name} · {p.quantite} vidéos · ID {p.model_id}\n"
         await interaction.response.send_message(msg, ephemeral=True)
+
+    @bot.tree.command(
+        name="queue",
+        description="Voir tes batchs en cours/en attente avec ETA",
+    )
+    async def queue_cmd(interaction: "discord.Interaction"):
+        user_id = interaction.user.id
+        my_pending = [(i, p) for i, p in enumerate(_pending) if p.user_id == user_id]
+        is_current_mine = bool(_current and _current.user_id == user_id)
+
+        if not my_pending and not is_current_mine:
+            await interaction.response.send_message(
+                "✅ Tu n'as aucun batch en cours ou en attente.",
+                ephemeral=True,
+            )
+            return
+
+        spv = _seconds_per_video()
+        lines = ["**📊 Tes batchs ClipFusion :**"]
+        if is_current_mine and _current:
+            lines.append(f"⚙️ **En cours** : {_current.quantite} vidéos")
+        for idx, req in my_pending:
+            ahead_videos = sum(p.quantite for p in _pending[:idx])
+            if _current:
+                ahead_videos += _current.quantite // 2
+            eta_str = _format_eta(ahead_videos * spv)
+            lines.append(
+                f"⏳ **Position {idx+1}** · {req.quantite} vidéos · ETA ~{eta_str}"
+            )
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @bot.tree.command(
+        name="admin_account_info",
+        description="[Admin] Infos détaillées + stats sur un compte Insta",
+    )
+    @app_commands.describe(compte="Username du compte (sans @)")
+    async def admin_account_info_cmd(
+        interaction: "discord.Interaction",
+        compte: str,
+    ):
+        if not _is_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ Cette commande est réservée aux admins.",
+                ephemeral=True,
+            )
+            return
+        clean = (compte or "").strip().lstrip("@").strip()
+        if not clean:
+            await interaction.response.send_message(
+                "❌ Username invalide.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            stats = await asyncio.to_thread(cf_storage.get_account_stats, clean)
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Erreur : `{type(e).__name__}: {str(e)[:200]}`",
+                ephemeral=True,
+            )
+            return
+        if not stats:
+            await interaction.followup.send(
+                f"❌ Compte **@{clean}** introuvable.",
+                ephemeral=True,
+            )
+            return
+
+        acc = stats["account"]
+        success_pct = stats.get("success_rate_pct")
+        success_str = f"{success_pct}%" if success_pct is not None else "N/A"
+        created_at = (acc.get("created_at") or "")[:10]
+        last_batch = stats.get("last_batch_at") or "jamais"
+        if last_batch and last_batch != "jamais":
+            last_batch = last_batch[:16].replace("T", " ")
+
+        msg = (
+            f"**📋 @{acc['username']}**\n"
+            f"• Owner : **{acc.get('va_name') or '?'}** "
+            f"(<@{acc.get('va_discord_id') or '0'}>)\n"
+            f"• Device : `{acc.get('device_choice', '?')}` "
+            f"(iOS `{acc.get('ios_version') or '?'}`)\n"
+            f"• GPS : **{acc.get('gps_city', '?')}** "
+            f"({acc.get('gps_lat', 0):.4f}, {acc.get('gps_lng', 0):.4f})\n"
+            f"• Model DB id : `{acc.get('model_id', '?')}`\n"
+            f"• Compte créé le : `{created_at}`\n\n"
+            f"**📊 Stats** :\n"
+            f"• **{stats['total_batches']}** batchs · "
+            f"**{stats['total_uploaded']}/{stats['total_requested']}** vidéos "
+            f"({success_str} succès)\n"
+            f"• Dernier batch : `{last_batch}`\n"
+            f"• Durée moyenne : `{stats['avg_duration_seconds']:.0f}s`\n"
+        )
+        recent = stats.get("recent_batches") or []
+        if recent:
+            msg += "\n**🕐 5 derniers batchs :**\n"
+            for b in recent:
+                date = (b.get("created_at") or "?")[:16].replace("T", " ")
+                msg += (
+                    f"• `{date}` · {b['videos_uploaded']}/{b['videos_count']} "
+                    f"({b['duration_seconds']:.0f}s)\n"
+                )
+
+        await interaction.followup.send(msg, ephemeral=True)
 
     @bot.tree.command(
         name="cancel",

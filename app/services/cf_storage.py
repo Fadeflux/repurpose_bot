@@ -1198,6 +1198,86 @@ def find_account(username: str, model_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_account_stats(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Retourne les stats agrégées d'un compte : total batches, total vidéos
+    requested/uploaded, taux succès, derniers batch, etc.
+    Utilisé par /admin_account_info pour debug rapide.
+    """
+    if not is_db_enabled() or not username:
+        return None
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                # 1. Info compte
+                cur.execute(
+                    "SELECT id, username, model_id, va_discord_id, va_name, "
+                    "device_choice, gps_lat, gps_lng, gps_city, created_at, "
+                    "ios_version, ios_set_at "
+                    "FROM cf_accounts WHERE username = %s LIMIT 1",
+                    (username.strip(),),
+                )
+                acc_row = cur.fetchone()
+                if not acc_row:
+                    return None
+                account = _row_to_account(acc_row)
+
+                # 2. Stats agrégées des batches
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS total_batches,
+                        COALESCE(SUM(videos_count), 0) AS total_requested,
+                        COALESCE(SUM(videos_uploaded), 0) AS total_uploaded,
+                        MAX(created_at) AS last_batch_at,
+                        AVG(duration_seconds) AS avg_duration
+                    FROM cf_batches
+                    WHERE account_username = %s
+                    """,
+                    (username.strip(),),
+                )
+                stats_row = cur.fetchone() or (0, 0, 0, None, 0)
+                total_batches = int(stats_row[0])
+                requested = int(stats_row[1])
+                uploaded = int(stats_row[2])
+                success_rate = round(100.0 * uploaded / requested, 1) if requested > 0 else None
+
+                # 3. Last 5 batches
+                cur.execute(
+                    """
+                    SELECT created_at, videos_count, videos_uploaded, duration_seconds
+                    FROM cf_batches
+                    WHERE account_username = %s
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                    """,
+                    (username.strip(),),
+                )
+                recent_batches = [
+                    {
+                        "created_at": r[0].isoformat() if r[0] else None,
+                        "videos_count": int(r[1]),
+                        "videos_uploaded": int(r[2]),
+                        "duration_seconds": float(r[3] or 0),
+                    }
+                    for r in cur.fetchall()
+                ]
+
+        return {
+            "account": account,
+            "total_batches": total_batches,
+            "total_requested": requested,
+            "total_uploaded": uploaded,
+            "success_rate_pct": success_rate,
+            "last_batch_at": stats_row[3].isoformat() if stats_row[3] else None,
+            "avg_duration_seconds": float(stats_row[4] or 0),
+            "recent_batches": recent_batches,
+        }
+    except Exception as e:
+        logger.error(f"get_account_stats failed: {e}")
+        return None
+
+
 def find_account_any_model(username: str) -> Optional[Dict[str, Any]]:
     """
     Cherche un compte par username uniquement (sans filtrer par modèle).
