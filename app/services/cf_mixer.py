@@ -920,6 +920,7 @@ def mix_batch_stream(
     model_id: Optional[int] = None,
     account: Optional[Dict[str, Any]] = None,
     tz_name: str = "benin",
+    channel_id: Optional[int] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Streaming version yielding progress events.
@@ -1461,10 +1462,17 @@ def mix_batch_stream(
                                 is_bot_enabled,
                             )
                             if is_bot_enabled():
-                                # On lance les coroutines en async background
+                                # On lance les coroutines en async background.
+                                # On passe channel_id pour que notify_va_drive_ready
+                                # puisse fallback dans le canal d'origine si le VA a
+                                # ses DMs fermés (au lieu de rater la notif).
                                 async def _send_notifs():
                                     try:
-                                        await notify_va_drive_ready(va_discord_id, folder_url or "")
+                                        await notify_va_drive_ready(
+                                            va_discord_id,
+                                            folder_url or "",
+                                            fallback_channel_id=channel_id,
+                                        )
                                     except Exception as e:
                                         logger.warning(f"DM VA échoué: {e}")
                                     try:

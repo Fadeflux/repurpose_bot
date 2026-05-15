@@ -547,38 +547,70 @@ async def send_batch_notification_via_bot(
         return False
 
 
-async def notify_va_drive_ready(discord_id: str, folder_url: str = "") -> bool:
+async def notify_va_drive_ready(
+    discord_id: str,
+    folder_url: str = "",
+    fallback_channel_id: Optional[int] = None,
+) -> bool:
     """
     Envoie un DM privé à un VA pour lui dire que son Drive est à jour.
-    Retourne True si envoyé avec succès.
+
+    Si le DM échoue (DMs fermés = Forbidden), fallback : post le message
+    dans `fallback_channel_id` en mentionnant le VA. Comme ça il rate
+    jamais sa notif même avec les DMs désactivés.
+
+    Retourne True si AU MOINS UN canal de notif a marché (DM ou fallback).
     """
     global _bot
     if _bot is None or not _bot.is_ready():
         logger.warning("Bot Discord pas prêt, DM non envoyé")
         return False
+
+    if folder_url:
+        msg = (
+            f"✅ **Ton Drive est mis à jour**, va voir en appuyant sur "
+            f"**[Ouvrir le dossier Drive]({folder_url})**"
+        )
+    else:
+        msg = (
+            "✅ **Ton Drive est mis à jour**, va voir dans ton application "
+            "**Google Drive** (dossier dans **Partagé avec moi**)."
+        )
+
+    # 1. Tentative DM (chemin nominal)
+    dm_failed = False
     try:
         user = await _bot.fetch_user(int(discord_id))
-        if not user:
-            return False
-        if folder_url:
-            msg = (
-                f"✅ **Ton Drive est mis à jour**, va voir en appuyant sur "
-                f"**[Ouvrir le dossier Drive]({folder_url})**"
-            )
-        else:
-            msg = (
-                "✅ **Ton Drive est mis à jour**, va voir dans ton application "
-                "**Google Drive** (dossier dans **Partagé avec moi**)."
-            )
-        await user.send(msg)
-        logger.info(f"DM Drive envoyé à {discord_id}")
-        return True
+        if user:
+            await user.send(msg)
+            logger.info(f"DM Drive envoyé à {discord_id}")
+            return True
+        # user introuvable : on tombe sur le fallback
+        dm_failed = True
     except discord.Forbidden:
-        logger.info(f"DM fermés pour user {discord_id}")
-        return False
+        logger.info(f"DMs fermés pour user {discord_id}, fallback vers canal")
+        dm_failed = True
     except Exception as e:
-        logger.warning(f"Erreur DM Drive à {discord_id}: {e}")
-        return False
+        logger.warning(f"Erreur DM Drive à {discord_id}: {e}, fallback vers canal")
+        dm_failed = True
+
+    # 2. Fallback : post dans le canal d'origine si fourni
+    if dm_failed and fallback_channel_id:
+        try:
+            channel = _bot.get_channel(int(fallback_channel_id))
+            if channel is None:
+                channel = await _bot.fetch_channel(int(fallback_channel_id))
+            if channel:
+                # Mention privée → le VA reçoit une notif Discord même si DM bloqué
+                await channel.send(f"<@{discord_id}> {msg}")
+                logger.info(
+                    f"Fallback notif Drive dans canal {fallback_channel_id} pour user {discord_id}"
+                )
+                return True
+        except Exception as e:
+            logger.warning(f"Fallback canal Drive échoué pour {discord_id}: {e}")
+
+    return False
 
 
 # =============================================================================

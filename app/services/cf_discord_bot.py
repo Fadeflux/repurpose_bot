@@ -409,6 +409,7 @@ async def _process_request(req: CFRequest):
             model_id=req.model_id,
             account=req.account,     # NOUVEAU : si fourni, active le mode fenêtres
             tz_name=req.tz_name,     # NOUVEAU : timezone du VA (benin/madagascar)
+            channel_id=req.channel_id,  # Fallback canal si DMs du VA fermés
         ):
             t = ev.get("type")
             # FIX : le mixer émet "item_done" pour chaque vidéo terminée (pas "progress")
