@@ -215,6 +215,16 @@ try:
 except Exception as _anom_err:
     logger.warning(f"Failed to start anomaly check scheduler: {_anom_err}")
 
+# Valide les env vars CF_* + Discord + Drive au boot.
+# Log un résumé clair : combien set, lesquelles critiques manquent, lesquelles
+# sont invalides. Permet de spotter une mauvaise config Railway au démarrage
+# plutôt qu'au moment où un VA fait /request.
+try:
+    from app.services.cf_settings import validate_env_vars
+    validate_env_vars()
+except Exception as _settings_err:
+    logger.warning(f"Failed to validate env vars: {_settings_err}")
+
 
 # ===== CONCURRENCE LOCK =====
 # Limite à 1 SEUL mix en parallèle (évite OOM kill quand 2+ VAs lancent /request ensemble).
