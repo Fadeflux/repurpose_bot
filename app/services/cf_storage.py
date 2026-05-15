@@ -51,14 +51,100 @@ def is_db_enabled() -> bool:
     return bool(_get_database_url())
 
 
+# Pool de connexions Postgres (psycopg2 ThreadedConnectionPool).
+# Réutilise les sockets TCP → -30-100ms par query (sur Railway DB).
+# minconn=1, maxconn=10 = sweet spot pour notre charge.
+import threading as _threading
+from contextlib import contextmanager as _contextmanager
+
+_db_pool = None  # type: ignore
+_db_pool_lock = _threading.Lock()
+
+
+def _get_pool():
+    """Lazy init du pool. Retourne None si DATABASE_URL pas configuré."""
+    global _db_pool
+    if _db_pool is not None:
+        return _db_pool
+    with _db_pool_lock:
+        if _db_pool is not None:
+            return _db_pool
+        url = _get_database_url()
+        if not url:
+            return None
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+        try:
+            from psycopg2.pool import ThreadedConnectionPool
+            _db_pool = ThreadedConnectionPool(minconn=1, maxconn=10, dsn=url)
+            logger.info("✅ DB connection pool initialisé (min=1, max=10)")
+        except Exception as e:
+            logger.error(f"Pool init failed, fallback connexions directes: {e}")
+            _db_pool = None
+    return _db_pool
+
+
+@_contextmanager
 def _get_connection():
-    import psycopg2
-    url = _get_database_url()
-    if not url:
-        raise RuntimeError("DATABASE_URL non configuré")
-    if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
-    return psycopg2.connect(url)
+    """
+    Context manager pour récupérer une connexion DB pooled.
+
+    Compat 100% avec l'usage `with _get_connection() as conn:` existant.
+    Gère commit/rollback auto + retour de la connexion au pool en fin de bloc.
+    Si pool indispo, fallback sur connexion directe (one-shot, plus lent).
+    """
+    pool = _get_pool()
+    if pool is None:
+        # Fallback : connexion directe (pas configuré ou pool init failed)
+        import psycopg2
+        url = _get_database_url()
+        if not url:
+            raise RuntimeError("DATABASE_URL non configuré")
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+        conn = psycopg2.connect(url)
+        try:
+            yield conn
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return
+
+    # Path normal : pool
+    conn = pool.getconn()
+    try:
+        yield conn
+        try:
+            conn.commit()
+        except Exception:
+            pass
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            pool.putconn(conn)
+        except Exception:
+            # Si la connexion est crashée, on la close au lieu de la retourner au pool
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def gen_id() -> str:

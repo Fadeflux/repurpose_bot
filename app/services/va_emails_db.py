@@ -43,16 +43,88 @@ def is_db_enabled() -> bool:
     return bool(_get_database_url())
 
 
+import threading as _threading
+from contextlib import contextmanager as _contextmanager
+
+_db_pool = None  # type: ignore
+_db_pool_lock = _threading.Lock()
+
+
+def _get_pool():
+    """Lazy init du pool. None si DATABASE_URL pas set."""
+    global _db_pool
+    if _db_pool is not None:
+        return _db_pool
+    with _db_pool_lock:
+        if _db_pool is not None:
+            return _db_pool
+        url = _get_database_url()
+        if not url:
+            return None
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+        try:
+            from psycopg2.pool import ThreadedConnectionPool
+            _db_pool = ThreadedConnectionPool(minconn=1, maxconn=5, dsn=url)
+            logger.info("✅ va_emails_db pool initialisé (min=1, max=5)")
+        except Exception as e:
+            logger.error(f"Pool init failed: {e}")
+            _db_pool = None
+    return _db_pool
+
+
+@_contextmanager
 def _get_connection():
-    """Ouvre une connexion Postgres. Lève si pas configuré."""
-    import psycopg2
-    url = _get_database_url()
-    if not url:
-        raise RuntimeError("DATABASE_URL non configuré")
-    # Railway donne parfois postgres:// au lieu de postgresql://
-    if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
-    return psycopg2.connect(url)
+    """Context manager pooled (compat avec usage existant)."""
+    pool = _get_pool()
+    if pool is None:
+        # Fallback : connexion directe
+        import psycopg2
+        url = _get_database_url()
+        if not url:
+            raise RuntimeError("DATABASE_URL non configuré")
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+        conn = psycopg2.connect(url)
+        try:
+            yield conn
+            try:
+                conn.commit()
+            except Exception:
+                pass
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return
+    conn = pool.getconn()
+    try:
+        yield conn
+        try:
+            conn.commit()
+        except Exception:
+            pass
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            pool.putconn(conn)
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def init_schema() -> bool:

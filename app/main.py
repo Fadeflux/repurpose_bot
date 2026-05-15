@@ -120,6 +120,36 @@ async def on_startup():
         logger.warning(f"Impossible de démarrer le cleanup Drive: {e}")
 
 
+@app.on_event("shutdown")
+async def on_shutdown():
+    """
+    Graceful shutdown : sur SIGTERM (Railway redeploy, manual restart, etc.),
+    on close proprement les pools DB pour éviter les connexions orphelines
+    et on log clairement la fin du process.
+
+    Note : uvicorn catch SIGTERM puis fire cet event. Discord bot et FFmpeg
+    en cours seront killed quand le process exit après la grace period
+    Railway (~30s) — pas grand chose à faire pour eux côté Python.
+    """
+    logger.info("🛑 Shutdown received, cleanup en cours...")
+    # Close DB pools
+    try:
+        from app.services import cf_storage
+        if cf_storage._db_pool is not None:
+            cf_storage._db_pool.closeall()
+            logger.info("✅ cf_storage DB pool fermé proprement")
+    except Exception as e:
+        logger.warning(f"Erreur close cf_storage pool: {e}")
+    try:
+        from app.services import va_emails_db
+        if va_emails_db._db_pool is not None:
+            va_emails_db._db_pool.closeall()
+            logger.info("✅ va_emails_db pool fermé proprement")
+    except Exception as e:
+        logger.warning(f"Erreur close va_emails_db pool: {e}")
+    logger.info("🛑 Shutdown done, exit clean.")
+
+
 # =============================================================================
 # Routes auth
 # =============================================================================
