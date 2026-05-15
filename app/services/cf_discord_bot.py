@@ -932,14 +932,19 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
 
         # 6. Réponse initiale dans le canal (s'auto-supprime après CF_CHANNEL_MSG_TTL = 30s)
         position = len(_pending) + (1 if _current and _current is not req else 0)
+        # Bloc info compte (device + GPS + état) — visible direct dans le canal,
+        # comme ça le VA voit quel compte il a hit AVANT d'ouvrir son DM.
+        # account_msg_extra a été construit plus haut selon : compte connu OU nouveau.
         if position <= 1 and _current is None:
             ack = (
-                f"⚙️ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}** · équipe **{team}**\n"
+                f"⚙️ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}** · équipe **{team}**"
+                f"{account_msg_extra}\n"
                 f"📩 <@{interaction.user.id}> tu as reçu un DM avec les détails. Lancement immédiat..."
             )
         else:
             ack = (
-                f"⏳ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}** · équipe **{team}**\n"
+                f"⏳ Demande acceptée : **{quantite}** vidéos pour modèle **{model['label']}** · équipe **{team}**"
+                f"{account_msg_extra}\n"
                 f"📩 <@{interaction.user.id}> tu as reçu un DM avec les détails. Position dans la file : **{position}**"
             )
         ttl = _channel_msg_ttl()
