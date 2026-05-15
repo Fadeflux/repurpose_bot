@@ -200,23 +200,47 @@ async def send_simple_message(content: str) -> bool:
 # Alertes admin (webhook séparé pour signaler les batches problématiques)
 # ============================================================
 
-def is_admin_webhook_enabled() -> bool:
-    """Retourne True si un webhook admin séparé est configuré."""
-    return bool(os.getenv("DISCORD_ADMIN_WEBHOOK_URL"))
+def _get_admin_webhook_for_team(team: Optional[str] = None) -> Optional[str]:
+    """
+    Retourne l'URL du webhook admin selon la team :
+    - team="geelark" → DISCORD_ADMIN_WEBHOOK_URL_GEELARK si défini
+    - team="instagram" → DISCORD_ADMIN_WEBHOOK_URL_INSTAGRAM si défini
+    - team="threads" → DISCORD_ADMIN_WEBHOOK_URL_THREADS si défini
+    - Sinon ou si team-spécifique pas défini → fallback DISCORD_ADMIN_WEBHOOK_URL
+
+    Permet de router les alertes par équipe (Geelark alerts → canal Geelark
+    admin, Insta alerts → canal Insta admin) tout en gardant un fallback
+    global pour les alertes qui n'ont pas de team (ex: Drive quota).
+    """
+    if team:
+        t = team.lower().strip()
+        team_var = f"DISCORD_ADMIN_WEBHOOK_URL_{t.upper()}"
+        team_url = os.getenv(team_var, "").strip()
+        if team_url:
+            return team_url
+    return os.getenv("DISCORD_ADMIN_WEBHOOK_URL", "").strip() or None
+
+
+def is_admin_webhook_enabled(team: Optional[str] = None) -> bool:
+    """True si un webhook admin (team-specific ou global) est configuré."""
+    return bool(_get_admin_webhook_for_team(team))
 
 
 async def send_admin_alert(
     title: str,
     message: str,
     level: str = "info",
+    team: Optional[str] = None,
 ) -> bool:
     """
     Envoie une alerte admin via webhook dédié.
     level : 'info' (bleu), 'warning' (orange), 'error' (rouge)
+    team  : 'geelark' / 'instagram' / 'threads' → route vers le webhook
+            de cette équipe si défini, sinon fallback sur le webhook global.
     """
-    webhook_url = os.getenv("DISCORD_ADMIN_WEBHOOK_URL")
+    webhook_url = _get_admin_webhook_for_team(team)
     if not webhook_url:
-        logger.debug("Admin webhook non configuré, alerte ignorée")
+        logger.debug(f"Admin webhook non configuré (team={team}), alerte ignorée")
         return False
 
     color_map = {

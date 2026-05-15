@@ -106,10 +106,24 @@ ENV_VARS: List[EnvVar] = [
 
     # --- WEBHOOKS ---
     EnvVar("DISCORD_ADMIN_WEBHOOK_URL", "discord",
-           "Webhook admin (stats hebdo, anomaly alerts, batch fails)",
+           "Webhook admin global (fallback si pas de webhook par équipe). "
+           "Stats hebdo, anomaly alerts, batch fails, Drive quota.",
+           is_secret=True),
+    EnvVar("DISCORD_ADMIN_WEBHOOK_URL_GEELARK", "discord",
+           "Webhook admin spécifique équipe Geelark (override le global)",
+           is_secret=True),
+    EnvVar("DISCORD_ADMIN_WEBHOOK_URL_INSTAGRAM", "discord",
+           "Webhook admin spécifique équipe Instagram (override le global)",
+           is_secret=True),
+    EnvVar("DISCORD_ADMIN_WEBHOOK_URL_THREADS", "discord",
+           "Webhook admin spécifique équipe Threads (override le global)",
            is_secret=True),
     EnvVar("DISCORD_WEBHOOK_URL", "discord",
            "Webhook général notifs batchs (fallback du bot)",
+           is_secret=True),
+    EnvVar("CF_LOLA_WEBHOOK_SECRET", "discord",
+           "Shared secret pour le webhook Lola → repurpose_bot (va_banned). "
+           "Si vide, le endpoint /api/lola/* est désactivé.",
            is_secret=True),
 
     # --- DRIVE ---

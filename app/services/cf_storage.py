@@ -1712,10 +1712,8 @@ def get_va_volume_anomalies(
     Filtre min_today_videos : on ignore les "petits" jours pour éviter le bruit
     (ex: VA qui passe de 5 à 20 vidéos = 4x mais pas un signal).
 
-    Use case typique :
-    - VA habituellement à 50 vidéos/jour → soudain 200 vidéos en 24h
-    - Compte compromis, panique, ou VA en train de spammer pour mauvaises raisons
-    - Pinger l'admin pour qu'il check rapidement
+    Inclut le `team` de chaque VA (depuis cf_batches.team) pour permettre
+    le routage par webhook dans cf_weekly_stats.
     """
     if not is_db_enabled():
         return []
@@ -1724,7 +1722,9 @@ def get_va_volume_anomalies(
             SELECT
                 va_name,
                 COALESCE(SUM(videos_uploaded), 0) AS today_videos,
-                COUNT(*) AS today_batches
+                COUNT(*) AS today_batches,
+                -- Team le plus récent pour ce VA
+                MAX(team) AS team
             FROM cf_batches
             WHERE va_name != ''
                 AND created_at >= NOW() - INTERVAL '24 hours'
@@ -1751,7 +1751,8 @@ def get_va_volume_anomalies(
             t.va_name,
             t.today_videos,
             t.today_batches,
-            COALESCE(b.avg_daily, 0) AS baseline_avg
+            COALESCE(b.avg_daily, 0) AS baseline_avg,
+            COALESCE(t.team, '') AS team
         FROM today_volumes t
         LEFT JOIN baseline_avg b ON b.va_name = t.va_name
         WHERE
@@ -1790,6 +1791,7 @@ def get_va_volume_anomalies(
                     "baseline_avg": round(baseline, 1),
                     "ratio": round(ratio, 2) if ratio else None,
                     "is_new_va": baseline == 0,
+                    "team": (r[4] if len(r) > 4 else "") or "",
                 }
             )
         return out

@@ -32,20 +32,33 @@ def _is_enabled() -> bool:
     return raw not in ("0", "false", "no", "off", "")
 
 
-def get_weekly_stats(days: int = 7) -> Optional[Dict[str, Any]]:
+def get_weekly_stats(days: int = 7, team: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Query DB pour récupérer les stats des `days` derniers jours.
+
+    Args:
+        days: période (en jours)
+        team: si fourni, filtre par team (geelark / instagram / threads).
+              Si None, stats globales.
+
     Retourne None si DB pas dispo.
     """
     if not cf_storage.is_db_enabled():
         return None
+
+    # Construit la clause team_filter dynamique
+    team_filter_sql = ""
+    team_params: tuple = ()
+    if team:
+        team_filter_sql = "AND team = %s"
+        team_params = (team.lower().strip(),)
 
     try:
         with cf_storage._get_connection() as conn:
             with conn.cursor() as cur:
                 # 1. Vue d'ensemble
                 cur.execute(
-                    """
+                    f"""
                     SELECT
                         COUNT(*) AS total_batches,
                         COALESCE(SUM(videos_count), 0) AS total_requested,
@@ -54,8 +67,9 @@ def get_weekly_stats(days: int = 7) -> Optional[Dict[str, Any]]:
                         COALESCE(AVG(duration_seconds), 0) AS avg_duration
                     FROM cf_batches
                     WHERE created_at > NOW() - (%s || ' days')::INTERVAL
+                    {team_filter_sql}
                     """,
-                    (str(days),),
+                    (str(days),) + team_params,
                 )
                 row = cur.fetchone() or (0, 0, 0, 0, 0)
                 overview = {
@@ -68,7 +82,7 @@ def get_weekly_stats(days: int = 7) -> Optional[Dict[str, Any]]:
 
                 # 2. Top 5 VAs par vidéos uploadées
                 cur.execute(
-                    """
+                    f"""
                     SELECT
                         va_name,
                         COUNT(*) AS batch_count,
@@ -76,11 +90,12 @@ def get_weekly_stats(days: int = 7) -> Optional[Dict[str, Any]]:
                     FROM cf_batches
                     WHERE created_at > NOW() - (%s || ' days')::INTERVAL
                         AND va_name != ''
+                        {team_filter_sql}
                     GROUP BY va_name
                     ORDER BY videos_uploaded DESC
                     LIMIT 5
                     """,
-                    (str(days),),
+                    (str(days),) + team_params,
                 )
                 top_vas = [
                     {
@@ -93,7 +108,7 @@ def get_weekly_stats(days: int = 7) -> Optional[Dict[str, Any]]:
 
                 # 3. VAs avec taux d'échec >20% (min 3 batchs pour éviter le bruit)
                 cur.execute(
-                    """
+                    f"""
                     SELECT
                         va_name,
                         COUNT(*) AS batch_count,
@@ -102,6 +117,7 @@ def get_weekly_stats(days: int = 7) -> Optional[Dict[str, Any]]:
                     FROM cf_batches
                     WHERE created_at > NOW() - (%s || ' days')::INTERVAL
                         AND va_name != ''
+                        {team_filter_sql}
                     GROUP BY va_name
                     HAVING COUNT(*) >= 3
                         AND COALESCE(SUM(videos_count), 0) > 0
@@ -110,7 +126,7 @@ def get_weekly_stats(days: int = 7) -> Optional[Dict[str, Any]]:
                     ORDER BY batch_count DESC
                     LIMIT 5
                     """,
-                    (str(days),),
+                    (str(days),) + team_params,
                 )
                 problem_vas = []
                 for r in cur.fetchall():
@@ -179,20 +195,50 @@ def format_weekly_stats_message(stats: Dict[str, Any]) -> str:
 async def send_weekly_stats(days: int = 7) -> bool:
     """
     Query + format + envoie au webhook admin.
-    Retourne True si envoyé avec succès.
+
+    Stratégie de routage :
+    - Pour chaque team (geelark, instagram, threads) dont le webhook
+      DISCORD_ADMIN_WEBHOOK_URL_<TEAM> est défini, on envoie les stats
+      FILTRÉES sur cette team uniquement.
+    - Si aucun webhook par team n'est défini, fallback : 1 seul message
+      avec stats globales sur DISCORD_ADMIN_WEBHOOK_URL.
+
+    Retourne True si au moins un envoi a marché.
     """
-    if not is_admin_webhook_enabled():
-        logger.info("Stats hebdo skip : DISCORD_ADMIN_WEBHOOK_URL non configuré")
-        return False
+    sent_any = False
+    teams_to_check = ["geelark", "instagram", "threads"]
 
-    stats = get_weekly_stats(days=days)
-    if not stats:
-        logger.warning("Stats hebdo : query DB échouée ou vide")
-        return False
+    # 1. Envoi per-team si webhook spécifique configuré
+    for team in teams_to_check:
+        if not is_admin_webhook_enabled(team=team):
+            continue
+        # Si la team n'a pas son propre webhook ET qu'on tombe sur le webhook
+        # global, on skip cette boucle (sinon on enverrait 3 fois la même chose).
+        team_webhook = os.environ.get(
+            f"DISCORD_ADMIN_WEBHOOK_URL_{team.upper()}", ""
+        ).strip()
+        if not team_webhook:
+            continue
+        stats = get_weekly_stats(days=days, team=team)
+        if not stats or stats["overview"]["total_batches"] == 0:
+            continue
+        msg = format_weekly_stats_message(stats)
+        title = f"Stats hebdo ClipFusion · {team.capitalize()}"
+        ok = await send_admin_alert(title=title, message=msg, level="info", team=team)
+        sent_any = sent_any or ok
 
-    msg = format_weekly_stats_message(stats)
-    title = "Stats hebdo ClipFusion"
-    return await send_admin_alert(title=title, message=msg, level="info")
+    # 2. Fallback : si aucun webhook par team, envoi global
+    if not sent_any and is_admin_webhook_enabled():
+        stats = get_weekly_stats(days=days, team=None)
+        if stats:
+            msg = format_weekly_stats_message(stats)
+            title = "Stats hebdo ClipFusion"
+            ok = await send_admin_alert(title=title, message=msg, level="info")
+            sent_any = sent_any or ok
+
+    if not sent_any:
+        logger.info("Stats hebdo skip : aucun webhook admin configuré")
+    return sent_any
 
 
 # ============================================================================
@@ -252,10 +298,9 @@ def _start_weekly_stats_scheduler() -> None:
 async def check_and_alert_anomalies() -> int:
     """
     Vérifie les anomalies de volume et envoie un admin alert si y en a.
-    Retourne le nombre d'anomalies détectées (0 = tout normal).
+    Groupe par team pour router vers le webhook correspondant.
+    Retourne le nombre TOTAL d'anomalies détectées (0 = tout normal).
     """
-    if not is_admin_webhook_enabled():
-        return 0
     try:
         anomalies = cf_storage.get_va_volume_anomalies(
             multiplier_threshold=float(os.environ.get("CF_ANOMALY_MULTIPLIER", "3")),
@@ -269,29 +314,43 @@ async def check_and_alert_anomalies() -> int:
     if not anomalies:
         return 0
 
-    lines = ["**⚠️ Volumes anormaux sur les dernières 24h :**\n"]
+    # Group by team (vide = unknown → ira sur webhook fallback)
+    by_team: Dict[str, List[Dict[str, Any]]] = {}
     for a in anomalies:
-        if a["is_new_va"]:
-            lines.append(
-                f"• `{a['va_name']}` (NOUVEAU VA) — **{a['today_videos']}** vidéos "
-                f"en {a['today_batches']} batchs"
-            )
-        else:
-            lines.append(
-                f"• `{a['va_name']}` — **{a['today_videos']}** vidéos "
-                f"(vs avg {a['baseline_avg']}/jour → **×{a['ratio']}**)"
-            )
+        t = (a.get("team") or "").lower().strip() or "_unknown"
+        by_team.setdefault(t, []).append(a)
 
-    lines.append(
-        "\n_Check rapide : compte compromis ? VA qui spam ? Panique ? "
-        "Ou juste une grosse journée légitime ?_"
-    )
-    await send_admin_alert(
-        title=f"Volume anormal détecté ({len(anomalies)} VA)",
-        message="\n".join(lines),
-        level="warning",
-    )
-    return len(anomalies)
+    total_sent = 0
+    for team, items in by_team.items():
+        # Le webhook : team-specific si dispo, sinon fallback global
+        team_arg = None if team == "_unknown" else team
+        if not is_admin_webhook_enabled(team=team_arg):
+            continue
+        team_label = team.capitalize() if team != "_unknown" else ""
+        lines = [f"**⚠️ Volumes anormaux 24h{(' · ' + team_label) if team_label else ''} :**\n"]
+        for a in items:
+            if a["is_new_va"]:
+                lines.append(
+                    f"• `{a['va_name']}` (NOUVEAU VA) — **{a['today_videos']}** vidéos "
+                    f"en {a['today_batches']} batchs"
+                )
+            else:
+                lines.append(
+                    f"• `{a['va_name']}` — **{a['today_videos']}** vidéos "
+                    f"(vs avg {a['baseline_avg']}/jour → **×{a['ratio']}**)"
+                )
+        lines.append(
+            "\n_Check rapide : compte compromis ? VA qui spam ? Panique ?_"
+        )
+        ok = await send_admin_alert(
+            title=f"Volume anormal{(' · ' + team_label) if team_label else ''} ({len(items)} VA)",
+            message="\n".join(lines),
+            level="warning",
+            team=team_arg,
+        )
+        if ok:
+            total_sent += len(items)
+    return total_sent
 
 
 async def check_drive_quota_and_alert(threshold_pct: float = 80.0) -> bool:
