@@ -12,12 +12,26 @@ Si DATABASE_URL n'est pas défini, le module est désactivé silencieusement
 (le cache JSON continue de marcher seul, en mode éphémère).
 """
 import os
+import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from app.utils.logger import get_logger
 
 logger = get_logger("va_emails_db")
+
+
+# In-memory cache de load_all_emails() (TTL 30s).
+# Évite de lire toute la table à chaque /request (table appelée à chaque check email).
+# Invalidé automatiquement quand save_email() ou delete_email() est appelé.
+_emails_cache: Optional[Tuple[float, Dict[str, str]]] = None
+_EMAILS_CACHE_TTL_SEC = 30
+
+
+def _invalidate_emails_cache() -> None:
+    """Force le prochain load_all_emails() à re-query la DB."""
+    global _emails_cache
+    _emails_cache = None
 
 
 def _get_database_url() -> Optional[str]:
@@ -96,6 +110,8 @@ def save_email(discord_id: str, email: str, name: str = "", team: str = "") -> b
             with conn.cursor() as cur:
                 cur.execute(sql, (str(discord_id), email.lower().strip(), name or "", team or ""))
             conn.commit()
+        # Invalide le cache pour que le prochain load_all_emails() voie le nouvel email
+        _invalidate_emails_cache()
         logger.info(f"DB: email enregistré pour discord_id={discord_id}")
         return True
     except Exception as e:
@@ -106,15 +122,24 @@ def save_email(discord_id: str, email: str, name: str = "", team: str = "") -> b
 def load_all_emails() -> Dict[str, str]:
     """
     Retourne un dict {discord_id: email} de tous les VA enregistrés.
+
+    Caché en mémoire 30s (invalidé sur save/delete). Évite de scanner toute
+    la table à chaque /request (gain ~100-200ms sur Railway).
     """
+    global _emails_cache
     if not is_db_enabled():
         return {}
+    now = time.monotonic()
+    if _emails_cache is not None and (now - _emails_cache[0]) < _EMAILS_CACHE_TTL_SEC:
+        return _emails_cache[1]
     try:
         with _get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT discord_id, email FROM va_emails;")
                 rows = cur.fetchall()
-        return {str(row[0]): row[1] for row in rows}
+        result = {str(row[0]): row[1] for row in rows}
+        _emails_cache = (now, result)
+        return result
     except Exception as e:
         logger.exception(f"load_all_emails ÉCHEC: {e}")
         return {}
@@ -129,6 +154,7 @@ def delete_email(discord_id: str) -> bool:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM va_emails WHERE discord_id = %s;", (str(discord_id),))
             conn.commit()
+        _invalidate_emails_cache()
         return True
     except Exception as e:
         logger.warning(f"delete_email ÉCHEC pour {discord_id}: {e}")

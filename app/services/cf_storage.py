@@ -14,14 +14,30 @@ Note : les fichiers eux-mêmes restent sur disque (storage/clipfusion/...).
 La DB ne stocke que les métadonnées + chemins.
 """
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.utils.logger import get_logger
 
 logger = get_logger("cf_storage")
+
+
+# In-memory cache de list_models() (TTL 30s).
+# list_models est appelée à chaque /request (via get_model_by_label_number) et
+# à chaque /models. La table cf_models change très rarement (création manuelle
+# par admin via le site). Caché 30s = -100/200ms sur Railway sans inconsistance.
+# Invalidé automatiquement quand add_model/delete_model/rename_model.
+_models_cache: Optional[Tuple[float, List[Dict[str, Any]]]] = None
+_MODELS_CACHE_TTL_SEC = 30
+
+
+def _invalidate_models_cache() -> None:
+    """Force le prochain list_models() à re-query la DB."""
+    global _models_cache
+    _models_cache = None
 
 
 # ---------------------------------------------------------------------------
@@ -910,9 +926,16 @@ def get_batches_stats() -> Dict[str, Any]:
 # MODELS (créatrices OnlyFans gérées par les VAs)
 # ---------------------------------------------------------------------------
 def list_models() -> List[Dict[str, Any]]:
-    """Liste tous les modèles enregistrés, triés par ID."""
+    """
+    Liste tous les modèles enregistrés, triés par ID.
+    Caché en mémoire 30s, invalidé sur add/delete/rename.
+    """
+    global _models_cache
     if not is_db_enabled():
         return []
+    now = time.monotonic()
+    if _models_cache is not None and (now - _models_cache[0]) < _MODELS_CACHE_TTL_SEC:
+        return _models_cache[1]
     try:
         with _get_connection() as conn:
             with conn.cursor() as cur:
@@ -920,7 +943,7 @@ def list_models() -> List[Dict[str, Any]]:
                     "SELECT id, label, created_at FROM cf_models ORDER BY id ASC"
                 )
                 rows = cur.fetchall()
-        return [
+        result = [
             {
                 "id": int(r[0]),
                 "label": r[1] or f"Modele {r[0]}",
@@ -928,6 +951,8 @@ def list_models() -> List[Dict[str, Any]]:
             }
             for r in rows
         ]
+        _models_cache = (now, result)
+        return result
     except Exception as e:
         logger.error(f"list_models failed: {e}")
         return []
@@ -959,6 +984,8 @@ def add_model(label: str = "") -> Optional[Dict[str, Any]]:
                     )
                     row = cur.fetchone()
             conn.commit()
+        # Invalide le cache pour que /request voie le nouveau modèle direct
+        _invalidate_models_cache()
         return {
             "id": int(row[0]),
             "label": row[1],
@@ -978,6 +1005,8 @@ def delete_model(model_id: int) -> bool:
                 cur.execute("DELETE FROM cf_models WHERE id = %s", (int(model_id),))
                 deleted = cur.rowcount > 0
             conn.commit()
+        if deleted:
+            _invalidate_models_cache()
         return deleted
     except Exception as e:
         logger.error(f"delete_model failed: {e}")
@@ -1000,6 +1029,8 @@ def rename_model(model_id: int, new_label: str) -> bool:
                 )
                 updated = cur.rowcount > 0
             conn.commit()
+        if updated:
+            _invalidate_models_cache()
         return updated
     except Exception as e:
         logger.error(f"rename_model failed: {e}")
