@@ -303,6 +303,10 @@ _queue: "asyncio.Queue[CFRequest]" = None  # type: ignore
 _worker_task: Optional[asyncio.Task] = None
 _current: Optional[CFRequest] = None
 _pending: List[CFRequest] = []
+# Set des interaction_ids des batchs annulés via /cancel.
+# Le worker check ce set quand il pull de la queue : si match → skip.
+# On n'annule QUE les pending (pas _current qui est déjà en FFmpeg).
+_cancelled_ids: set = set()
 
 
 def _ensure_queue():
@@ -320,6 +324,21 @@ async def _worker_loop():
     while True:
         try:
             req: CFRequest = await _queue.get()
+            # Check si le batch a été annulé via /cancel avant d'être traité.
+            # Dans ce cas on skip proprement (pas de process, juste task_done).
+            if req.interaction_id in _cancelled_ids:
+                logger.info(
+                    f"Batch annulé (interaction_id={req.interaction_id}, "
+                    f"user={req.user_name}) → skip"
+                )
+                _cancelled_ids.discard(req.interaction_id)
+                try:
+                    _pending.remove(req)
+                except ValueError:
+                    pass
+                _queue.task_done()
+                continue
+
             _current = req
             try:
                 _pending.remove(req)
@@ -1142,6 +1161,54 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             for i, p in enumerate(_pending[:10], 1):
                 msg += f"{i}. {p.user_name} · {p.quantite} vidéos · ID {p.model_id}\n"
         await interaction.response.send_message(msg, ephemeral=True)
+
+    @bot.tree.command(
+        name="cancel",
+        description="Annule tes batchs ClipFusion en attente (pas ceux déjà en cours)",
+    )
+    async def cancel_cmd(interaction: "discord.Interaction"):
+        # Cherche les batchs pending de ce VA
+        my_pending = [p for p in _pending if p.user_id == interaction.user.id]
+
+        if not my_pending:
+            # Check si batch en cours est le sien (on PEUT pas l'annuler mais on prévient)
+            if _current and _current.user_id == interaction.user.id:
+                await interaction.response.send_message(
+                    f"⚠️ Tu as un batch **en cours de traitement** "
+                    f"(`{_current.quantite}` vidéos sur modèle DB id `{_current.model_id}`).\n"
+                    f"On peut pas l'annuler une fois que FFmpeg a démarré (les vidéos sont déjà "
+                    f"partiellement encodées). Attends qu'il se termine.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "✅ Tu n'as aucun batch en attente. Rien à annuler.",
+                    ephemeral=True,
+                )
+            return
+
+        # Marque tous les pending de ce VA comme annulés
+        total_quantite = 0
+        for req in my_pending:
+            _cancelled_ids.add(req.interaction_id)
+            try:
+                _pending.remove(req)
+            except ValueError:
+                pass
+            total_quantite += req.quantite
+
+        n = len(my_pending)
+        s = "s" if n > 1 else ""
+        await interaction.response.send_message(
+            f"✅ **{n} batch{s} annulé{s}** ({total_quantite} vidéos en moins).\n"
+            f"Si un batch est déjà en cours de traitement, il continue (pas annulable une fois "
+            f"que FFmpeg a démarré).",
+            ephemeral=True,
+        )
+        logger.info(
+            f"/cancel par {interaction.user.name} ({interaction.user.id}) : "
+            f"{n} batchs ({total_quantite} vidéos) annulés"
+        )
 
     @bot.tree.command(
         name="stats",
