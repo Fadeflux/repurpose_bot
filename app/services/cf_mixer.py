@@ -199,6 +199,15 @@ def _start_periodic_orphan_accounts_cleanup() -> None:
 _start_periodic_orphan_accounts_cleanup()
 
 
+# Démarre le scheduler des stats hebdo (chaque lundi 09:00 UTC).
+# Désactivable via CF_WEEKLY_STATS_ENABLED=0 dans Railway.
+try:
+    from app.services.cf_weekly_stats import _start_weekly_stats_scheduler as _start_wstats
+    _start_wstats()
+except Exception as _stats_err:
+    logger.warning(f"Failed to start weekly stats scheduler: {_stats_err}")
+
+
 # ===== CONCURRENCE LOCK =====
 # Limite à 1 SEUL mix en parallèle (évite OOM kill quand 2+ VAs lancent /request ensemble).
 # Les autres mix attendent leur tour dans la queue.
