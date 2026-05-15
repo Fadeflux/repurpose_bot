@@ -857,15 +857,23 @@ def _build_ffmpeg_cmd(
         "-crf", "23",
         "-b:v", f"{bitrate_kbps}k",
         "-pix_fmt", "yuv420p",
+        # Color tags explicites bt709 (Rec. 709). Sans ça, FFmpeg met "unknown"
+        # ce qui est un tell vs un vrai iPhone qui set toujours explicitement.
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-colorspace", "bt709",
     ]
     if use_hevc:
         # tag:v hvc1 = marqueur Apple/QuickTime obligatoire pour que les lecteurs
         # iOS/Mac/QuickTime reconnaissent le HEVC. Sans ça, le fichier passe en
         # "hev1" qui est moins largement supporté et trahit un encodage non-iPhone.
         cmd += ["-tag:v", "hvc1"]
+    # Audio bitrate variable : vrais iPhones varient 64-192k selon mode.
+    # On reste dans une fourchette propre (96-192k) pour pas dégrader.
+    audio_bitrate = random.choice([96, 128, 160, 192])
     cmd += [
         "-c:a", "aac",
-        "-b:a", "128k",
+        "-b:a", f"{audio_bitrate}k",
         # Strip original metadata
         "-map_metadata", "-1",
         # bitexact : wipe complètement le tag Encoder auto-ajouté par FFmpeg
