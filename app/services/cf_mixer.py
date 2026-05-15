@@ -430,6 +430,34 @@ def _build_audio_spoof_filter(
     return f"asetrate={new_rate},aresample={source_sample_rate},atempo={tempo_compensation:.6f}"
 
 
+def _should_use_hevc(metadata: Optional[Dict[str, str]]) -> bool:
+    """
+    Décide si on encode en HEVC (libx265) pour cette variante.
+
+    Réalité iPhone : depuis l'iPhone 12, le défaut est HEVC en 1080p/4K.
+    Sortir 100% en H.264 est un signal de spoof. On varie pour ressembler
+    à la diversité réelle des uploads :
+    - iPhone Pro/Pro Max : 60% HEVC (recordent en HEVC par défaut)
+    - autres iPhones : 30% HEVC
+    - inconnu / non-iPhone : 0% (H.264 = compat max)
+
+    Désactivable globalement via CF_HEVC_ENABLED=0 (utile si problème
+    de compat preview Drive / VAs avec vieux Android).
+    """
+    if os.environ.get("CF_HEVC_ENABLED", "1").strip().lower() in ("0", "false", "no", "off"):
+        return False
+    if not metadata:
+        return False
+    model = (metadata.get("model") or "").lower()
+    if not model.startswith("iphone"):
+        return False
+    if "pro" in model:
+        return random.random() < 0.6
+    if any(x in model for x in ("16", "17")):
+        return random.random() < 0.3
+    return False
+
+
 def _escape_drawtext(text: str) -> str:
     """Escape text for FFmpeg drawtext filter."""
     if not text:
@@ -766,15 +794,33 @@ def _build_ffmpeg_cmd(
             except Exception:
                 pass
 
+    # Choix du codec selon le device spoofé : iPhone moderne = HEVC parfois,
+    # tout le reste reste H.264 (compat max).
+    use_hevc = _should_use_hevc(metadata)
+    if use_hevc:
+        # libx265 = HEVC (H.265). preset "fast" pour compenser le fait que x265
+        # est intrinsèquement 2-3x plus lent que x264. À CRF égal x265 produit
+        # un fichier 30-50% plus petit pour qualité équivalente.
+        video_codec = "libx265"
+        video_preset = "fast"
+    else:
+        # libx264 = H.264. preset medium : compression 2-3x meilleure que veryfast.
+        video_codec = "libx264"
+        video_preset = "medium"
+
     cmd += [
-        "-c:v", "libx264",
-        # medium = compression 2-3x meilleure que veryfast à bitrate égal.
-        # Encode plus lent (30s → 60-90s par vidéo) mais qualité visuelle nettement
-        # supérieure (moins de pixellisation/artefacts dans le mouvement).
-        "-preset", "medium",
+        "-c:v", video_codec,
+        "-preset", video_preset,
         "-crf", "23",
         "-b:v", f"{bitrate_kbps}k",
         "-pix_fmt", "yuv420p",
+    ]
+    if use_hevc:
+        # tag:v hvc1 = marqueur Apple/QuickTime obligatoire pour que les lecteurs
+        # iOS/Mac/QuickTime reconnaissent le HEVC. Sans ça, le fichier passe en
+        # "hev1" qui est moins largement supporté et trahit un encodage non-iPhone.
+        cmd += ["-tag:v", "hvc1"]
+    cmd += [
         "-c:a", "aac",
         "-b:a", "128k",
         # Strip original metadata
