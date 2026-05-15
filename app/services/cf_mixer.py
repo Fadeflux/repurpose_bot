@@ -430,6 +430,27 @@ def _build_audio_spoof_filter(
     return f"asetrate={new_rate},aresample={source_sample_rate},atempo={tempo_compensation:.6f}"
 
 
+def _choose_output_resolution() -> Tuple[int, int]:
+    """
+    Tire une résolution de sortie pour cette variante.
+
+    Vrais uploads iPhone : la majorité en 1080p, mais ~10-15% en 720p
+    (compat mode, recording économique, etc.). 4K skipped : trop lent à
+    encoder + Insta/TikTok recompress de toute façon.
+
+    Désactivable via CF_RESOLUTION_VARY=0 → toujours 1080p.
+
+    Returns (W, H).
+    """
+    if os.environ.get("CF_RESOLUTION_VARY", "1").strip().lower() in (
+        "0", "false", "no", "off",
+    ):
+        return (TARGET_W, TARGET_H)
+    if random.random() < 0.15:
+        return (720, 1280)
+    return (TARGET_W, TARGET_H)
+
+
 def _should_use_hevc(metadata: Optional[Dict[str, str]]) -> bool:
     """
     Décide si on encode en HEVC (libx265) pour cette variante.
@@ -739,6 +760,18 @@ def _build_ffmpeg_cmd(
     else:
         filter_complex_parts = [scale_chain]
         out_label = "[vid]"
+
+    # Résolution finale variable : ~15% des vidéos sortent en 720p au lieu
+    # de 1080p, comme les vraies uploads iPhone qui varient. On ajoute juste
+    # un scale en dernière étape du filter_complex (caption + tout passe à
+    # la résolution finale, donc reste proportionnel).
+    final_w, final_h = _choose_output_resolution()
+    if (final_w, final_h) != (TARGET_W, TARGET_H):
+        downscale_chain = (
+            f"{out_label}scale={final_w}:{final_h}:flags=lanczos[final]"
+        )
+        filter_complex_parts.append(downscale_chain)
+        out_label = "[final]"
 
     # ===== Audio filter pour speed (atempo) + pitch (asetrate) =====
     # On probe le sample rate RÉEL du fichier audio source (vidéo ou musique)
