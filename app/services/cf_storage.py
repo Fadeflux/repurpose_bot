@@ -281,6 +281,18 @@ def init_schema() -> bool:
                     ADD COLUMN IF NOT EXISTS ios_version TEXT DEFAULT '',
                     ADD COLUMN IF NOT EXISTS ios_set_at TIMESTAMPTZ DEFAULT NULL
                 """)
+                # Migration : ajout archived_at pour soft-delete via webhook Lola
+                # (quand un VA est ban, ses comptes sont archivés au lieu de
+                # supprimés → on garde l'historique batches/owner pour audit)
+                cur.execute("""
+                    ALTER TABLE cf_accounts
+                    ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ DEFAULT NULL,
+                    ADD COLUMN IF NOT EXISTS archive_reason TEXT DEFAULT ''
+                """)
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_cf_accounts_archived "
+                    "ON cf_accounts(archived_at)"
+                )
             conn.commit()
         logger.info("ClipFusion DB schema initialisé")
         return True
@@ -1240,12 +1252,19 @@ def _row_to_account(row) -> Dict[str, Any]:
         "created_at": row[9].isoformat() if row[9] else None,
         "ios_version": "",
         "ios_set_at": None,
+        "archived_at": None,
+        "archive_reason": "",
     }
     # Les colonnes 10 et 11 sont optionnelles (ajoutées par migration)
     if len(row) > 10:
         base["ios_version"] = row[10] or ""
     if len(row) > 11:
         base["ios_set_at"] = row[11].isoformat() if row[11] else None
+    # Colonnes 12-13 : archived_at + archive_reason (migration récente)
+    if len(row) > 12:
+        base["archived_at"] = row[12].isoformat() if row[12] else None
+    if len(row) > 13:
+        base["archive_reason"] = row[13] or ""
     return base
 
 
@@ -1282,6 +1301,49 @@ def find_account(username: str, model_id: int) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"find_account failed: {e}")
         return None
+
+
+def archive_accounts_for_va(
+    va_discord_id: str,
+    reason: str = "",
+) -> Dict[str, Any]:
+    """
+    Soft-delete : marque tous les comptes d'un VA comme archivés.
+    Utilisé quand Lola ban un VA → ses comptes ne peuvent plus servir.
+
+    On garde la row pour l'historique (audit, debug, restore éventuel).
+    /request rejette les comptes archivés.
+
+    Retourne dict avec count des comptes archivés.
+    """
+    if not is_db_enabled() or not va_discord_id:
+        return {"archived": 0, "error": "missing_input_or_db"}
+    try:
+        with _get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE cf_accounts
+                    SET archived_at = NOW(),
+                        archive_reason = %s
+                    WHERE va_discord_id = %s
+                      AND archived_at IS NULL
+                    RETURNING id, username
+                    """,
+                    (reason[:200], str(va_discord_id)),
+                )
+                archived_rows = cur.fetchall()
+        archived_list = [
+            {"id": int(r[0]), "username": r[1]} for r in archived_rows
+        ]
+        logger.info(
+            f"archive_accounts_for_va: {len(archived_list)} comptes archivés "
+            f"pour discord_id={va_discord_id} (reason='{reason[:80]}')"
+        )
+        return {"archived": len(archived_list), "accounts": archived_list}
+    except Exception as e:
+        logger.error(f"archive_accounts_for_va failed: {e}")
+        return {"archived": 0, "error": str(e)}
 
 
 def get_account_stats(username: str) -> Optional[Dict[str, Any]]:
@@ -1378,7 +1440,8 @@ def find_account_any_model(username: str) -> Optional[Dict[str, Any]]:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT id, username, model_id, va_discord_id, va_name, "
-                    "device_choice, gps_lat, gps_lng, gps_city, created_at, ios_version, ios_set_at "
+                    "device_choice, gps_lat, gps_lng, gps_city, created_at, "
+                    "ios_version, ios_set_at, archived_at, archive_reason "
                     "FROM cf_accounts WHERE username = %s "
                     "ORDER BY created_at DESC LIMIT 1",
                     (username.strip(),),

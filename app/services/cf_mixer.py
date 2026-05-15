@@ -215,6 +215,14 @@ try:
 except Exception as _anom_err:
     logger.warning(f"Failed to start anomaly check scheduler: {_anom_err}")
 
+# Démarre le scheduler de monitoring du quota Drive (toutes les 6h).
+# Désactivable via CF_DRIVE_QUOTA_CHECK_ENABLED=0.
+try:
+    from app.services.cf_weekly_stats import _start_drive_quota_scheduler as _start_dquota
+    _start_dquota()
+except Exception as _dquota_err:
+    logger.warning(f"Failed to start drive quota scheduler: {_dquota_err}")
+
 # Valide les env vars CF_* + Discord + Drive au boot.
 # Log un résumé clair : combien set, lesquelles critiques manquent, lesquelles
 # sont invalides. Permet de spotter une mauvaise config Railway au démarrage
@@ -1234,6 +1242,43 @@ def mix_batch_stream(
                 spoof_meta["com.apple.quicktime.location.ISO6709"] = location_str
             except Exception:
                 pass
+
+            # Override creation_time pour qu'elle soit cohérente avec la fenêtre
+            # horaire de post : si fenêtre = matin (target_hour=9 local), la
+            # vidéo est censée avoir été tournée en matinée. Évite l'incohérence
+            # "creation_time 14h UTC pour un post matin GMT+1".
+            try:
+                from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+                # Offset UTC selon la team
+                tz_offset_hours = 1 if tz_name == "benin" else 3 if tz_name == "madagascar" else 0
+                # target_hour est en local → on calcule l'UTC correspondant
+                target_utc_hour = (target_hour - tz_offset_hours) % 24
+                # Pick une date entre hier et il y a 3 jours pour réalisme
+                days_ago = random.randint(1, 3)
+                target_dt = _dt.now(_tz.utc) - _td(days=days_ago)
+                target_dt = target_dt.replace(
+                    hour=target_utc_hour,
+                    minute=random.randint(0, 59),
+                    second=random.randint(0, 59),
+                    microsecond=0,
+                )
+                # Format Apple/FFmpeg attendu
+                fmt = target_dt.strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+                fmt_apple = target_dt.strftime("%Y-%m-%dT%H:%M:%S+0000")
+                # Offsets vidéo/audio (1-3s pour v, +1-2s pour a comme les iPhones)
+                v_off = _td(seconds=random.randint(1, 3))
+                a_off_extra = _td(seconds=random.randint(1, 2))
+                v_fmt = (target_dt + v_off).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+                a_fmt = (target_dt + v_off + a_off_extra).strftime(
+                    "%Y-%m-%dT%H:%M:%S.000000Z"
+                )
+                spoof_meta["creation_time"] = fmt
+                spoof_meta["com.apple.quicktime.creationdate"] = fmt_apple
+                spoof_meta["_video_creation_time"] = v_fmt
+                spoof_meta["_audio_creation_time"] = a_fmt
+            except Exception as _ts_err:
+                yield {"type": "log", "level": "WARN",
+                       "message": f"Time-of-day override failed (non bloquant) : {_ts_err}"}
             device_label = spoof_meta.get("model", "?")
             yield {"type": "log", "level": "INFO",
                    "message": f"🔒 [{window_label} {target_hour}h] {device_label} · @{account.get('username', '?')}"}

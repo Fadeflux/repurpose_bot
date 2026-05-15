@@ -928,6 +928,17 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         is_new_account = False
 
         if existing:
+            # Compte archivé (Lola webhook va_banned ou archivage manuel) →
+            # interdit même à l'owner. Admin doit le restaurer en DB s'il veut le réutiliser.
+            if existing.get("archived_at"):
+                reason = existing.get("archive_reason") or "raison inconnue"
+                await interaction.followup.send(
+                    f"🚫 Le compte **@{clean_username}** a été **archivé** "
+                    f"(`{reason}`).\n"
+                    f"Demande à un admin de le restaurer si besoin.",
+                    ephemeral=True,
+                )
+                return
             # Compte déjà créé : vérifier la propriété (sauf admin qui peut tout)
             owner_id = str(existing.get("va_discord_id", "") or "")
             if owner_id and owner_id != user_id_str and not is_admin_user:
@@ -1063,45 +1074,58 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                     pass
             asyncio.create_task(_auto_delete_ack())
 
-        # 7. DM "en préparation" envoyé immédiatement au VA avec l'ETA
+        # 7. DM "en préparation" envoyé immédiatement au VA avec l'ETA (en embed)
         try:
             user = await interaction.client.fetch_user(interaction.user.id)
-            position_msg = ""
-            if position > 1:
-                position_msg = f"\n⏳ Position dans la file : **{position}**"
 
-            # Construction du message DM selon si compte ou pas
+            embed = discord.Embed(
+                title="🎬 Ta demande est en préparation !",
+                color=0xF39C12,  # orange "en cours"
+            )
+            embed.add_field(
+                name="📊 Demande",
+                value=(
+                    f"**{quantite}** vidéos · modèle **{model['label']}** · "
+                    f"équipe **{team}**"
+                ),
+                inline=False,
+            )
+
             if account_data:
-                # Calcul de la répartition fenêtres
+                tz_label = "Bénin GMT+1" if tz_name == "benin" else "Madagascar GMT+3"
+                embed.add_field(
+                    name="📍 Compte",
+                    value=(
+                        f"@**{account_data['username']}**\n"
+                        f"📱 {account_data['device_choice'].replace('_', ' ').title()}\n"
+                        f"🌍 {account_data['gps_city']}"
+                    ),
+                    inline=True,
+                )
                 n_per = quantite // 3
                 extra = quantite % 3
                 n_matin = n_per + extra
                 n_soir = n_per
                 n_nuit = n_per
-                tz_label = "Bénin GMT+1" if tz_name == "benin" else "Madagascar GMT+3"
-                account_block = (
-                    f"📍 Compte : @**{account_data['username']}**\n"
-                    f"📱 Device : **{account_data['device_choice'].replace('_', ' ').title()}**\n"
-                    f"🌍 GPS : **{account_data['gps_city']}**\n"
-                    f"\n📦 Répartition automatique ({tz_label}) :\n"
-                    f"  🌅 **{n_matin}** vidéos · fenêtre Matin (8h-9h)\n"
-                    f"  🌇 **{n_soir}** vidéos · fenêtre Soir (16h-17h)\n"
-                    f"  🌙 **{n_nuit}** vidéos · fenêtre Nuit (22h-23h)\n"
+                embed.add_field(
+                    name=f"📦 Répartition ({tz_label})",
+                    value=(
+                        f"🌅 **{n_matin}** matin (8h-9h)\n"
+                        f"🌇 **{n_soir}** soir (16h-17h)\n"
+                        f"🌙 **{n_nuit}** nuit (22h-23h)"
+                    ),
+                    inline=True,
                 )
-                await user.send(
-                    f"🎬 **Ta demande est en préparation !**\n"
-                    f"📊 **{quantite}** vidéos · modèle **{model['label']}** · équipe **{team}**\n"
-                    f"{account_block}"
-                    f"⏱️ Tu vas recevoir ton drive dans environ **{eta_str}**{position_msg}\n"
-                    f"Le drive contiendra 3 sous-dossiers (matin/soir/nuit) 🚀"
-                )
-            else:
-                await user.send(
-                    f"🎬 **Ta demande est en préparation !**\n"
-                    f"📊 **{quantite}** vidéos · modèle **{model['label']}** · équipe **{team}**\n"
-                    f"⏱️ Tu vas recevoir ton drive dans environ **{eta_str}**{position_msg}\n"
-                    f"Je t'enverrai le lien Drive dès que c'est prêt 🚀"
-                )
+
+            eta_val = f"~**{eta_str}**"
+            if position > 1:
+                eta_val += f"\n⏳ Position dans la file : **{position}**"
+            embed.add_field(name="⏱️ ETA", value=eta_val, inline=False)
+            embed.set_footer(
+                text="Tu recevras un DM dès que le Drive est prêt 🚀"
+            )
+
+            await user.send(embed=embed)
         except discord.Forbidden:
             logger.warning(f"DM 'en préparation' refusé pour user {interaction.user.id} (DMs désactivés)")
         except Exception as e:
@@ -1239,6 +1263,74 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             for i, p in enumerate(_pending[:10], 1):
                 msg += f"{i}. {p.user_name} · {p.quantite} vidéos · ID {p.model_id}\n"
         await interaction.response.send_message(msg, ephemeral=True)
+
+    @bot.tree.command(
+        name="help",
+        description="Liste toutes les commandes ClipFusion dispos pour toi",
+    )
+    async def help_cmd(interaction: "discord.Interaction"):
+        is_admin_user = _is_admin(interaction.user)
+        # Embed coloré bleu pour démarquer
+        embed = discord.Embed(
+            title="📚 Commandes ClipFusion",
+            description="Voici les commandes disponibles pour toi :",
+            color=0x3498DB,
+        )
+
+        # --- VA commands (toujours visibles) ---
+        embed.add_field(
+            name="🎬 /request `quantite` `modele` `compte`",
+            value=(
+                "Génère N variantes vidéo pour un compte Insta.\n"
+                "Ex : `/request quantite:6 modele:3 compte:sara`"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="🔁 /respoof `fichier` `compte` `fenetre`",
+            value=(
+                "Respoof une seule photo/vidéo existante (device + GPS du compte).\n"
+                "Ex : `/respoof fichier:[upload] compte:sara fenetre:matin`"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="📋 /models",
+            value="Liste les modèles (ID) auxquels tu as accès.",
+            inline=False,
+        )
+        embed.add_field(
+            name="📊 /queue",
+            value="Voir tes batchs en cours / en attente avec ETA.",
+            inline=False,
+        )
+        embed.add_field(
+            name="❌ /cancel",
+            value="Annule tes batchs en attente (pas ceux déjà en cours FFmpeg).",
+            inline=False,
+        )
+        embed.add_field(
+            name="📈 /status",
+            value="État global de la file d'attente ClipFusion.",
+            inline=False,
+        )
+
+        # --- Admin commands ---
+        if is_admin_user:
+            embed.add_field(
+                name="🔐 Commandes admin",
+                value=(
+                    "**/admin_account_info `compte`** — debug compte (owner, stats, history)\n"
+                    "**/stats `jours:7`** — envoie le récap des N derniers jours au webhook admin"
+                ),
+                inline=False,
+            )
+
+        embed.set_footer(
+            text="Pense à enregistrer ton Gmail dans #email-drive avant d'utiliser /request"
+        )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @bot.tree.command(
         name="queue",

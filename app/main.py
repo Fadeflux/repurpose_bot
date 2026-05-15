@@ -36,6 +36,7 @@ from app.routes.cf_vas import router as cf_vas_router
 from app.routes.cf_history import router as cf_history_router
 from app.routes.cf_models import router as cf_models_router
 from app.routes.cf_debug import router as cf_debug_router
+from app.routes.cf_lola_webhook import router as cf_lola_webhook_router
 from app.services.auth import (
     check_password,
     is_authenticated,
@@ -73,6 +74,7 @@ app.include_router(cf_vas_router)
 app.include_router(cf_history_router)
 app.include_router(cf_models_router)
 app.include_router(cf_debug_router)
+app.include_router(cf_lola_webhook_router)
 
 # Sert les fichiers statiques (CSS, JS, images si besoin)
 STATIC_DIR = Path(__file__).resolve().parent / "static"

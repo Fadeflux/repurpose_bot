@@ -294,6 +294,92 @@ async def check_and_alert_anomalies() -> int:
     return len(anomalies)
 
 
+async def check_drive_quota_and_alert(threshold_pct: float = 80.0) -> bool:
+    """
+    Check le quota Drive du service account et alerte si >= threshold_pct.
+
+    Pour un Service Account "personnel" : quota Drive normal (15 GB free).
+    Pour un Workspace : quota plus haut mais existe quand même.
+
+    Si l'usage dépasse threshold_pct (default 80%), ping admin webhook avec
+    le détail. Évite le shutdown brutal quand le quota est plein
+    (les uploads échouent silencieusement après).
+    """
+    if not is_admin_webhook_enabled():
+        return False
+    try:
+        from app.services.drive_service import get_drive_client, is_drive_enabled
+        if not is_drive_enabled():
+            return False
+        client = get_drive_client()
+        if client is None:
+            return False
+        about = client.about().get(fields="storageQuota,user").execute()
+        quota = about.get("storageQuota", {}) or {}
+        usage_bytes = int(quota.get("usage", 0))
+        limit_raw = quota.get("limit")
+        # Workspace / unlimited storage : pas de limit → skip
+        if not limit_raw:
+            return False
+        limit_bytes = int(limit_raw)
+        if limit_bytes <= 0:
+            return False
+        pct = round(100.0 * usage_bytes / limit_bytes, 1)
+        if pct < threshold_pct:
+            return False  # tout va bien, pas d'alerte
+        used_gb = usage_bytes / (1024**3)
+        limit_gb = limit_bytes / (1024**3)
+        free_gb = (limit_bytes - usage_bytes) / (1024**3)
+        msg = (
+            f"⚠️ **Quota Drive à {pct}%** ({used_gb:.1f} / {limit_gb:.1f} GB)\n"
+            f"Reste seulement **{free_gb:.1f} GB** libres.\n\n"
+            "_Actions possibles :_\n"
+            "• Cleanup manuel via `/api/admin/cleanup-drive`\n"
+            "• Vide les vieux batchs Drive manuellement\n"
+            "• Augmente le quota du compte (Workspace si pas déjà)"
+        )
+        await send_admin_alert(
+            title=f"Drive quota {pct}% - action requise",
+            message=msg,
+            level="warning" if pct < 95 else "error",
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"check_drive_quota_and_alert failed: {e}")
+        return False
+
+
+def _start_drive_quota_scheduler() -> None:
+    """
+    Daemon qui check le quota Drive toutes les 6h.
+    Désactivable via CF_DRIVE_QUOTA_CHECK_ENABLED=0.
+    """
+    if os.environ.get("CF_DRIVE_QUOTA_CHECK_ENABLED", "1").strip().lower() in (
+        "0", "false", "no", "off",
+    ):
+        logger.info("Drive quota check désactivé")
+        return
+
+    def _loop():
+        # Premier passage 1h après boot
+        _time.sleep(60 * 60)
+        interval_seconds = 6 * 3600
+        while True:
+            try:
+                threshold = float(os.environ.get("CF_DRIVE_QUOTA_THRESHOLD_PCT", "80"))
+                asyncio.run(check_drive_quota_and_alert(threshold_pct=threshold))
+            except Exception as e:
+                logger.warning(f"Drive quota loop error: {e}")
+            _time.sleep(interval_seconds)
+
+    try:
+        t = threading.Thread(target=_loop, daemon=True, name="cf-drive-quota")
+        t.start()
+        logger.info("✅ Drive quota scheduler started (toutes les 6h)")
+    except Exception as e:
+        logger.warning(f"Failed to start drive quota scheduler: {e}")
+
+
 def _start_anomaly_check_scheduler() -> None:
     """
     Daemon qui check les anomalies toutes les 4h.

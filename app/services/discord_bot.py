@@ -566,26 +566,42 @@ async def notify_va_drive_ready(
         logger.warning("Bot Discord pas prêt, DM non envoyé")
         return False
 
+    # Rich embed plutôt que plain text — plus visible, plus pro
+    embed = discord.Embed(
+        title="✅ Ton Drive est prêt !",
+        color=0x2ECC71,  # vert succès
+    )
     if folder_url:
-        msg = (
-            f"✅ **Ton Drive est mis à jour**, va voir en appuyant sur "
-            f"**[Ouvrir le dossier Drive]({folder_url})**"
+        embed.description = (
+            f"Toutes tes vidéos sont uploadées dans le dossier Drive ci-dessous :"
+        )
+        embed.add_field(
+            name="📁 Lien direct",
+            value=f"[Ouvrir le dossier Drive]({folder_url})",
+            inline=False,
         )
     else:
-        msg = (
-            "✅ **Ton Drive est mis à jour**, va voir dans ton application "
+        embed.description = (
+            "Toutes tes vidéos sont uploadées. Va voir dans ton application "
             "**Google Drive** (dossier dans **Partagé avec moi**)."
         )
+    embed.set_footer(text="ClipFusion · prêt à poster 🚀")
 
-    # 1. Tentative DM (chemin nominal)
+    # Fallback text version pour le channel si DMs fermés
+    fallback_text = (
+        f"✅ **Ton Drive est prêt** — "
+        f"[Ouvrir le dossier]({folder_url})" if folder_url else
+        "✅ **Ton Drive est prêt** — check Google Drive (Partagé avec moi)"
+    )
+
+    # 1. Tentative DM (chemin nominal, embed riche)
     dm_failed = False
     try:
         user = await _bot.fetch_user(int(discord_id))
         if user:
-            await user.send(msg)
+            await user.send(embed=embed)
             logger.info(f"DM Drive envoyé à {discord_id}")
             return True
-        # user introuvable : on tombe sur le fallback
         dm_failed = True
     except discord.Forbidden:
         logger.info(f"DMs fermés pour user {discord_id}, fallback vers canal")
@@ -594,15 +610,14 @@ async def notify_va_drive_ready(
         logger.warning(f"Erreur DM Drive à {discord_id}: {e}, fallback vers canal")
         dm_failed = True
 
-    # 2. Fallback : post dans le canal d'origine si fourni
+    # 2. Fallback : post dans le canal d'origine si fourni (embed + mention)
     if dm_failed and fallback_channel_id:
         try:
             channel = _bot.get_channel(int(fallback_channel_id))
             if channel is None:
                 channel = await _bot.fetch_channel(int(fallback_channel_id))
             if channel:
-                # Mention privée → le VA reçoit une notif Discord même si DM bloqué
-                await channel.send(f"<@{discord_id}> {msg}")
+                await channel.send(content=f"<@{discord_id}>", embed=embed)
                 logger.info(
                     f"Fallback notif Drive dans canal {fallback_channel_id} pour user {discord_id}"
                 )
