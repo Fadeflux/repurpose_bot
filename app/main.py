@@ -1,10 +1,29 @@
 """Point d'entrée FastAPI du repurpose bot."""
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+
+# Init Sentry (error tracking) AVANT tout autre import qui pourrait raise.
+# Activé seulement si SENTRY_DSN est set côté Railway (sinon no-op silencieux).
+_sentry_dsn = os.environ.get("SENTRY_DSN", "").strip()
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            traces_sample_rate=0.05,  # 5% des requêtes (économie quota)
+            profiles_sample_rate=0.0,
+            send_default_pii=False,    # pas de données user perso
+            environment=os.environ.get("RAILWAY_ENVIRONMENT", "production"),
+            release=os.environ.get("RAILWAY_DEPLOYMENT_ID", "unknown"),
+        )
+    except Exception:
+        # Si Sentry crash au boot, on continue silencieusement (jamais bloquer le bot)
+        pass
 
 from app.config import settings
 from app.routes.video import router as video_router
