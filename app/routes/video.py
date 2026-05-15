@@ -6,7 +6,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import aiofiles
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -201,13 +201,87 @@ def _update_progress(batch_id: str, total: int = None, uploaded_delta: int = 0, 
 
 @router.get("/health")
 async def health():
-    return {
-        "status": "ok",
-        "app": settings.APP_NAME,
-        "version": settings.VERSION,
-        "drive_enabled": is_drive_enabled(),
-        "discord_enabled": is_discord_enabled(),
-    }
+    """
+    Vrai health check : vérifie DB, Drive, Discord bot, FFmpeg.
+
+    - 200 si tout est OK
+    - 503 si au moins un check critique échoue (utilisable par UptimeRobot
+      ou similaire pour alerter quand le service est dégradé)
+
+    Chaque check a un timeout court pour pas bloquer le endpoint si une
+    dépendance externe rame.
+    """
+    checks: Dict[str, Any] = {}
+
+    # 1. DB (SELECT 1 → vérifie connexion + permissions)
+    try:
+        from app.services import cf_storage
+        if not cf_storage.is_db_enabled():
+            checks["database"] = {"ok": False, "error": "DATABASE_URL non configuré"}
+        else:
+            with cf_storage._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+            checks["database"] = {"ok": True}
+    except Exception as e:
+        checks["database"] = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    # 2. Drive (just check le client est init, pas d'upload de test ici)
+    try:
+        from app.services.drive_service import get_drive_client, is_drive_enabled as _drive_enabled
+        if not _drive_enabled():
+            checks["drive"] = {"ok": False, "error": "credentials Google non configurées"}
+        else:
+            client = get_drive_client()
+            if client is not None:
+                checks["drive"] = {"ok": True}
+            else:
+                checks["drive"] = {"ok": False, "error": "client unavailable"}
+    except Exception as e:
+        checks["drive"] = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    # 3. Discord bot (connexion gateway active)
+    try:
+        from app.services.discord_bot import is_bot_enabled, _bot
+        if not is_bot_enabled():
+            checks["discord_bot"] = {"ok": False, "error": "bot non configuré"}
+        elif _bot is None:
+            checks["discord_bot"] = {"ok": False, "error": "bot non initialisé"}
+        elif not _bot.is_ready():
+            checks["discord_bot"] = {"ok": False, "error": "bot non ready (gateway down ?)"}
+        else:
+            checks["discord_bot"] = {"ok": True, "latency_ms": round(_bot.latency * 1000, 1)}
+    except Exception as e:
+        checks["discord_bot"] = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    # 4. FFmpeg (présent dans le PATH, requis pour TOUS les mix/respoof)
+    try:
+        import shutil as _shutil
+        ffmpeg_ok = bool(_shutil.which("ffmpeg"))
+        ffprobe_ok = bool(_shutil.which("ffprobe"))
+        if ffmpeg_ok and ffprobe_ok:
+            checks["ffmpeg"] = {"ok": True}
+        else:
+            checks["ffmpeg"] = {
+                "ok": False,
+                "error": f"ffmpeg={ffmpeg_ok}, ffprobe={ffprobe_ok}",
+            }
+    except Exception as e:
+        checks["ffmpeg"] = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:150]}"}
+
+    all_ok = all(c.get("ok") for c in checks.values())
+    status_code = 200 if all_ok else 503
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ok" if all_ok else "degraded",
+            "app": settings.APP_NAME,
+            "version": settings.VERSION,
+            "checks": checks,
+        },
+    )
 
 
 @router.get("/params")
