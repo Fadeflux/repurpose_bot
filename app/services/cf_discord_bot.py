@@ -679,29 +679,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         # On peut envoyer des followups ephemeral OU publics après ce defer.
         await interaction.response.defer(ephemeral=False, thinking=True)
 
-        # 2.5. CHECK EMAIL VA (obligatoire pour pouvoir partager le Drive)
-        # Les admins sont bypass (ils ont déjà accès au Drive complet)
-        if not _is_admin(interaction.user):
-            user_id_for_check = str(interaction.user.id)
-            try:
-                from app.services import va_emails_db as _veb_req
-                all_emails_req = _veb_req.load_all_emails() or {}
-                va_email_req = all_emails_req.get(user_id_for_check, "") or ""
-            except Exception:
-                va_email_req = ""
-
-            if not va_email_req:
-                await interaction.followup.send(
-                    "❌ **Tu n'as pas encore enregistré ton email.**\n\n"
-                    "Pour utiliser `/request`, tu dois d'abord poster ton adresse Gmail "
-                    "dans le canal **#email-drive**.\n\n"
-                    "Une fois ton email enregistré, ton drive te sera automatiquement "
-                    "partagé sur cette adresse. 📧",
-                    ephemeral=True,
-                )
-                return
-
-        # 3. Validation quantité
+        # === VALIDATIONS NO-DB EN PREMIER (fail fast, pas besoin d'attendre la DB) ===
         max_q = _max_videos_per_request()
         if quantite < 1:
             await interaction.followup.send(
@@ -716,13 +694,79 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             )
             return
 
+        clean_username = compte.strip().lstrip("@").strip() if compte else ""
+        if not clean_username:
+            await interaction.followup.send(
+                "❌ Le nom du compte est invalide. Tape par exemple `compte:sara_official_2026` (sans @).",
+                ephemeral=True,
+            )
+            return
+
+        # === CHECKS DB EN PARALLÈLE (gain ~500ms sur Railway) ===
+        # 4 lectures DB indépendantes (email, model, rate limit, account existant).
+        # En série chaque appel ≈ 100-300ms sur Railway → 4 = 400-1200ms.
+        # En parallèle = max(individuels) ≈ 100-300ms. Gros gain de réactivité UX.
+        is_admin_user = _is_admin(interaction.user)
+        user_id_str = str(interaction.user.id)
+        va_name_for_check = interaction.user.display_name or interaction.user.name
+
+        async def _email_check_async():
+            if is_admin_user:
+                return ""  # admin bypass, valeur ignorée downstream
+            try:
+                from app.services import va_emails_db as _veb_req
+                all_emails = await asyncio.to_thread(_veb_req.load_all_emails)
+                return (all_emails or {}).get(user_id_str, "") or ""
+            except Exception:
+                return ""
+
+        async def _model_lookup_async():
+            try:
+                return await asyncio.to_thread(cf_storage.get_model_by_label_number, modele)
+            except Exception:
+                return None
+
+        async def _rate_limit_async():
+            if is_admin_user:
+                return (True, 0, 0, 0)  # admin bypass
+            try:
+                return await asyncio.to_thread(_check_rate_limit, va_name_for_check, quantite)
+            except Exception:
+                return (True, 0, 0, 0)  # fail-open : si DB foire on laisse passer
+
+        async def _account_lookup_async():
+            try:
+                return await asyncio.to_thread(cf_storage.find_account_any_model, clean_username)
+            except Exception:
+                return None
+
+        va_email_req, model, rate_result, existing = await asyncio.gather(
+            _email_check_async(),
+            _model_lookup_async(),
+            _rate_limit_async(),
+            _account_lookup_async(),
+        )
+
+        # === TRAITEMENT DES RÉSULTATS DANS L'ORDRE ===
+
+        # 2.5. CHECK EMAIL VA (obligatoire pour partager le Drive auto)
+        if not is_admin_user and not va_email_req:
+            await interaction.followup.send(
+                "❌ **Tu n'as pas encore enregistré ton email.**\n\n"
+                "Pour utiliser `/request`, tu dois d'abord poster ton adresse Gmail "
+                "dans le canal **#email-drive**.\n\n"
+                "Une fois ton email enregistré, ton drive te sera automatiquement "
+                "partagé sur cette adresse. 📧",
+                ephemeral=True,
+            )
+            return
+
         # 4. Validation modèle — LOOKUP PAR LABEL (pas par DB id)
         # Les VAs voient des labels "ID1", "ID8" etc. sur le site. Les IDs DB
         # peuvent être décalés (suppressions = trous dans l'auto-increment), donc
         # on cherche le modèle dont le label contient le numéro tapé, pas l'id DB.
-        model = cf_storage.get_model_by_label_number(modele)
         if not model:
-            available = cf_storage.list_models()
+            available = await asyncio.to_thread(cf_storage.list_models)
             if available:
                 lst = ", ".join(f"`{m['label']}`" for m in available[:20])
                 msg = f"❌ Modèle **ID{modele}** introuvable.\nDispos : {lst}"
@@ -737,10 +781,8 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         modele = int(model["id"])
 
         # 4b. RATE LIMIT (anti-abus) — bypass admin
-        va_name_for_check = interaction.user.display_name or interaction.user.name
-        is_admin_user = _is_admin(interaction.user)
         if not is_admin_user:
-            allowed, used, limit, remaining = _check_rate_limit(va_name_for_check, quantite)
+            allowed, used, limit, remaining = rate_result
             if not allowed:
                 _, days = _rate_limit_config()
                 if remaining > 0:
@@ -778,7 +820,7 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         guild_id = interaction.guild_id if interaction.guild_id else None
         team = _detect_team_from_guild(guild_id)
 
-        # Résolution du compte (paramètre obligatoire)
+        # Résolution du compte (déjà fetché via gather plus haut → `existing`)
         # Cas possibles :
         # - Compte n'existe pas → création auto (device + GPS US random lockés)
         # - Compte existe ET appartient au VA → utilisation
@@ -786,18 +828,6 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         account_data = None
         account_msg_extra = ""
         is_new_account = False
-        clean_username = compte.strip().lstrip("@").strip() if compte else ""
-        if not clean_username:
-            await interaction.followup.send(
-                "❌ Le nom du compte est invalide. Tape par exemple `compte:sara_official_2026` (sans @).",
-                ephemeral=True,
-            )
-            return
-
-        # Cherche le compte par username SEUL (sans filtrer par model_id)
-        # comme ça le même compte garde son device/GPS même si plusieurs modèles l'utilisent
-        existing = cf_storage.find_account_any_model(clean_username)
-        user_id_str = str(interaction.user.id)
 
         if existing:
             # Compte déjà créé : vérifier la propriété (sauf admin qui peut tout)
@@ -817,14 +847,20 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 f"({account_data['device_choice'].replace('_', ' ').title()} · {account_data['gps_city']})"
             )
         else:
-            # Création auto : random device + GPS US, lockés à vie sur ce compte
+            # Création auto : random device + GPS US, lockés à vie sur ce compte.
+            # asyncio.to_thread parce que c'est un INSERT DB synchrone.
             is_new_account = True
-            account_data = cf_storage.create_account(
-                username=clean_username,
-                model_id=modele,
-                va_discord_id=user_id_str,
-                va_name=interaction.user.display_name or interaction.user.name,
-            )
+            try:
+                account_data = await asyncio.to_thread(
+                    cf_storage.create_account,
+                    username=clean_username,
+                    model_id=modele,
+                    va_discord_id=user_id_str,
+                    va_name=interaction.user.display_name or interaction.user.name,
+                )
+            except Exception as _create_err:
+                logger.error(f"create_account failed: {_create_err}")
+                account_data = None
             if not account_data:
                 await interaction.followup.send(
                     f"❌ Impossible de créer le compte @{clean_username}. Réessaie ou ping un admin.",
