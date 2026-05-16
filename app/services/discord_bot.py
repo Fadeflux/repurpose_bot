@@ -285,6 +285,18 @@ def _build_bot() -> commands.Bot:
             await _handle_spoof_message(message)
             return
 
+        # Canal respoof : drag-drop multi-fichiers (compte écrit dans le texte)
+        try:
+            from app.services.cf_discord_bot import (
+                _get_respoof_channel_ids,
+                handle_respoof_message,
+            )
+            if message.channel.id in _get_respoof_channel_ids() and message.attachments:
+                await handle_respoof_message(message)
+                return
+        except Exception as e:
+            logger.warning(f"Respoof message routing échoué: {e}")
+
         if message.channel.id not in onboarding_ids:
             return
 
