@@ -1544,12 +1544,21 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
 
     @bot.tree.command(
         name="respoof",
-        description="Respoof une photo/vidéo existante avec le device + GPS lockés d'un compte",
+        description="Respoof 1 à 10 photos/vidéos d'un coup avec le device + GPS d'un compte",
     )
     @app_commands.describe(
-        fichier="Le fichier (photo .jpg/.png/.heic OU vidéo .mp4/.mov) à respoofer",
+        fichier="Fichier 1 (photo ou vidéo) à respoofer",
         compte="Username du compte Insta (sans @). Le device + GPS du compte sont appliqués.",
         fenetre="Fenêtre horaire pour les metadata (matin/soir/nuit). Cohérent avec ton heure de post.",
+        fichier2="(optionnel) Fichier 2",
+        fichier3="(optionnel) Fichier 3",
+        fichier4="(optionnel) Fichier 4",
+        fichier5="(optionnel) Fichier 5",
+        fichier6="(optionnel) Fichier 6",
+        fichier7="(optionnel) Fichier 7",
+        fichier8="(optionnel) Fichier 8",
+        fichier9="(optionnel) Fichier 9",
+        fichier10="(optionnel) Fichier 10",
     )
     @app_commands.choices(fenetre=[
         app_commands.Choice(name="🌅 Matin (8h-9h)", value="matin"),
@@ -1561,8 +1570,25 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         fichier: discord.Attachment,
         compte: str,
         fenetre: app_commands.Choice[str],
+        fichier2: Optional[discord.Attachment] = None,
+        fichier3: Optional[discord.Attachment] = None,
+        fichier4: Optional[discord.Attachment] = None,
+        fichier5: Optional[discord.Attachment] = None,
+        fichier6: Optional[discord.Attachment] = None,
+        fichier7: Optional[discord.Attachment] = None,
+        fichier8: Optional[discord.Attachment] = None,
+        fichier9: Optional[discord.Attachment] = None,
+        fichier10: Optional[discord.Attachment] = None,
     ):
         from app.services import cf_respoof, cf_storage, drive_service
+
+        # Collecte tous les fichiers fournis (1 obligatoire + 9 optionnels)
+        all_files = [
+            f for f in (
+                fichier, fichier2, fichier3, fichier4, fichier5,
+                fichier6, fichier7, fichier8, fichier9, fichier10,
+            ) if f is not None
+        ]
 
         # 0. Filtrage canal : /respoof uniquement dans les canaux dédiés
         respoof_channels = _get_respoof_channel_ids()
@@ -1574,16 +1600,16 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             )
             return
 
-        # 1. Détection auto du type
-        file_type = cf_respoof.detect_file_type(fichier.filename)
-        if file_type == "unknown":
-            await interaction.response.send_message(
-                f"❌ Format non supporté pour `{fichier.filename}`.\n"
-                f"Photos : .jpg / .jpeg / .png / .heic / .heif / .webp\n"
-                f"Vidéos : .mp4 / .mov / .m4v / .avi / .webm / .mkv",
-                ephemeral=True,
-            )
-            return
+        # 1. Détection auto du type pour TOUS les fichiers (reject si un seul KO)
+        for _f in all_files:
+            if cf_respoof.detect_file_type(_f.filename) == "unknown":
+                await interaction.response.send_message(
+                    f"❌ Format non supporté pour `{_f.filename}`.\n"
+                    f"Photos : .jpg / .jpeg / .png / .heic / .heif / .webp\n"
+                    f"Vidéos : .mp4 / .mov / .m4v / .avi / .webm / .mkv",
+                    ephemeral=True,
+                )
+                return
 
         # 2. Validation compte
         clean_username = compte.strip().lstrip("@").strip()
@@ -1678,7 +1704,8 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         # Récupère les infos du modèle pour les logs / DM
         model = cf_storage.get_model(modele) or {"id": modele, "label": f"ID{modele}"}
 
-        # 4. Rate limit (compte 1 vidéo dans le quota)
+        # 4. Rate limit (compte N fichiers dans le quota)
+        n_files = len(all_files)
         if not is_admin_user:
             max_v, period_days = _rate_limit_config()
             if max_v > 0:
@@ -1686,9 +1713,10 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                     interaction.user.display_name or interaction.user.name,
                     days=period_days,
                 )
-                if used + 1 > max_v:
+                if used + n_files > max_v:
                     await interaction.followup.send(
-                        f"⛔ Quota dépassé : {used}/{max_v} vidéos sur {period_days}j.",
+                        f"⛔ Quota dépassé : {used}/{max_v} vidéos sur {period_days}j "
+                        f"(tu envoies {n_files} fichier(s)).",
                         ephemeral=True,
                     )
                     return
@@ -1719,41 +1747,11 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                         )
                         return
 
-        # 6. Download du fichier depuis Discord (déjà déféré plus haut)
-        # MEM FIX : pour les vidéos, on stream vers disque pour ne pas charger
-        # 50-100 MB en RAM. Seules les photos (petites) sont chargées en mémoire
-        # (car cf_respoof.respoof_photo prend input_bytes en paramètre).
-        tmpdir = Path(tempfile.gettempdir()) / "cf_respoof"
-        tmpdir.mkdir(parents=True, exist_ok=True)
-        in_ext = Path(fichier.filename).suffix.lower() or ".bin"
-        tmp_in = tmpdir / f"respoof_in_{uuid.uuid4().hex}{in_ext}"
-
-        file_bytes = b""  # rempli seulement si photo
-        try:
-            if file_type == "photo":
-                # Photos : on garde en RAM (petits fichiers, et l'API respoof_photo en a besoin)
-                file_bytes = await fichier.read()
-                tmp_in.write_bytes(file_bytes)
-            else:
-                # Vidéos : stream direct vers disque (pas de RAM)
-                await fichier.save(str(tmp_in))
-        except Exception as e:
-            await interaction.followup.send(
-                f"❌ Impossible de lire le fichier : {e}",
-                ephemeral=True,
-            )
-            try:
-                tmp_in.unlink(missing_ok=True)
-            except Exception:
-                pass
-            return
-
-        # 9. Détermine team / tz / target_hour (depuis la fenêtre choisie par le VA)
+        # 6. Détermine team / tz / target_hour UNE FOIS (commun à tous les fichiers)
         team = _detect_team_from_guild(interaction.guild_id if interaction.guild else None)
         tz_name = os.environ.get(f"CF_TZ_{team.upper()}", "benin").lower().strip()
         if tz_name not in ("benin", "madagascar"):
             tz_name = "benin"
-        # Fenêtre horaire selon le choix du VA (matin / soir / nuit)
         _FENETRE_HOURS = {"matin": 9, "soir": 17, "nuit": 23}
         fenetre_value = fenetre.value if hasattr(fenetre, "value") else str(fenetre)
         target_hour = _FENETRE_HOURS.get(fenetre_value, 9)
@@ -1763,104 +1761,131 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
             "nuit": "🌙 Nuit (22h-23h)",
         }.get(fenetre_value, fenetre_value)
 
-        # 10. Respoof
-        try:
-            if file_type == "photo":
-                # Photo : retourne bytes
-                spoofed_bytes, info = cf_respoof.respoof_photo(
-                    input_bytes=file_bytes,
-                    filename=fichier.filename,
-                    account=account_data,
-                    target_hour=target_hour,
-                    tz_name=tz_name,
-                )
-                # Libère file_bytes immédiatement après usage
-                del file_bytes
-                file_bytes = b""
-                # Sauvegarde local
-                out_name = f"respoof_{clean_username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                tmp_out = tmpdir / out_name
-                tmp_out.write_bytes(spoofed_bytes)
-                # Libère spoofed_bytes après écriture disque
-                del spoofed_bytes
-            else:
-                # Vidéo : transcode in-place (file_bytes pas utilisé pour vidéo)
-                out_name = f"respoof_{clean_username}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
-                tmp_out = tmpdir / out_name
-                info = cf_respoof.respoof_video(
-                    input_path=str(tmp_in),
-                    output_path=str(tmp_out),
-                    account=account_data,
-                    target_hour=target_hour,
-                    tz_name=tz_name,
-                )
-        except Exception as e:
-            logger.error(f"Respoof failed: {e}", exc_info=True)
+        # 7. Crée UN SEUL dossier Drive pour tout le lot
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder_name = (
+            f"{clean_username}_respoof_"
+            f"{(interaction.user.display_name or interaction.user.name)}_{ts}"
+        )
+        folder_id = drive_service.create_batch_folder(folder_name) or ""
+        folder_url = drive_service.get_folder_link(folder_id) if folder_id else ""
+        if not folder_id:
             await interaction.followup.send(
-                f"❌ Erreur pendant le respoof : `{e}`",
+                "❌ Impossible de créer le dossier Drive. Réessaie ou ping un admin.",
                 ephemeral=True,
             )
             return
-        finally:
-            try:
-                tmp_in.unlink(missing_ok=True)
-            except Exception:
-                pass
 
-        # 11. Upload sur Drive (dans un dossier au nom du compte)
-        folder_id = ""
-        folder_url = ""
+        tmpdir = Path(tempfile.gettempdir()) / "cf_respoof"
+        tmpdir.mkdir(parents=True, exist_ok=True)
+
+        # 8. Boucle respoof + upload sur chaque fichier
+        results: List[tuple] = []  # (filename, ok: bool, info_or_error)
+        last_info: Dict[str, str] = {}
+        for idx, f in enumerate(all_files, 1):
+            file_type = cf_respoof.detect_file_type(f.filename)
+            in_ext = Path(f.filename).suffix.lower() or ".bin"
+            tmp_in = tmpdir / f"respoof_in_{uuid.uuid4().hex}{in_ext}"
+            tmp_out = None
+            file_bytes = b""
+            try:
+                # -- Download --
+                if file_type == "photo":
+                    file_bytes = await f.read()
+                    tmp_in.write_bytes(file_bytes)
+                else:
+                    await f.save(str(tmp_in))
+
+                # -- Respoof --
+                if file_type == "photo":
+                    spoofed_bytes, info = cf_respoof.respoof_photo(
+                        input_bytes=file_bytes,
+                        filename=f.filename,
+                        account=account_data,
+                        target_hour=target_hour,
+                        tz_name=tz_name,
+                    )
+                    del file_bytes
+                    file_bytes = b""
+                    out_name = f"respoof_{clean_username}_{idx:02d}_{ts}.jpg"
+                    tmp_out = tmpdir / out_name
+                    tmp_out.write_bytes(spoofed_bytes)
+                    del spoofed_bytes
+                    mime = "image/jpeg"
+                else:
+                    out_name = f"respoof_{clean_username}_{idx:02d}_{ts}.mp4"
+                    tmp_out = tmpdir / out_name
+                    info = cf_respoof.respoof_video(
+                        input_path=str(tmp_in),
+                        output_path=str(tmp_out),
+                        account=account_data,
+                        target_hour=target_hour,
+                        tz_name=tz_name,
+                    )
+                    mime = "video/mp4"
+                last_info = info or {}
+
+                # -- Upload Drive avec retry 3x backoff 2s/4s --
+                up = None
+                for attempt in range(1, 4):
+                    try:
+                        up = drive_service.upload_file(
+                            local_path=tmp_out,
+                            folder_id=folder_id,
+                            mime_type=mime,
+                        )
+                    except Exception as _up_err:
+                        logger.warning(
+                            f"Respoof upload exception ({f.filename}, "
+                            f"attempt {attempt}/3): {_up_err}"
+                        )
+                        up = None
+                    if up:
+                        break
+                    if attempt < 3:
+                        await asyncio.sleep(2 ** attempt)
+                if up:
+                    results.append((f.filename, True, info))
+                else:
+                    results.append((f.filename, False, "upload Drive échoué"))
+            except Exception as e:
+                logger.error(f"Respoof failed ({f.filename}): {e}", exc_info=True)
+                results.append((f.filename, False, str(e)[:120]))
+            finally:
+                try:
+                    tmp_in.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                if tmp_out is not None:
+                    try:
+                        tmp_out.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+        n_ok = sum(1 for _, ok, _ in results if ok)
+
+        # 9. Partage le dossier Drive avec le VA (email connu)
         va_email = ""
         try:
-            folder_name = (
-                f"{clean_username}_respoof_"
-                f"{(interaction.user.display_name or interaction.user.name)}_"
-                f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            )
-            folder_id = drive_service.create_batch_folder(folder_name) or ""
-            folder_url = drive_service.get_folder_link(folder_id) if folder_id else ""
-
-            # Mime type selon le type de fichier
-            mime = "image/jpeg" if file_type == "photo" else "video/mp4"
-            up = drive_service.upload_file(
-                local_path=tmp_out,
-                folder_id=folder_id,
-                mime_type=mime,
-            )
-
-            # Partage avec le VA si email connu
+            from app.services import va_emails_db
+            all_emails = va_emails_db.load_all_emails() or {}
+            va_email = all_emails.get(user_id_str, "") or ""
+        except Exception:
+            pass
+        if va_email and folder_id and n_ok > 0:
             try:
-                from app.services import va_emails_db
-                all_emails = va_emails_db.load_all_emails() or {}
-                va_email = all_emails.get(user_id_str, "") or ""
-            except Exception:
-                pass
-            if va_email and folder_id:
-                try:
-                    drive_service.share_folder_with_users(folder_id, [va_email])
-                except Exception as e:
-                    logger.warning(f"Drive share failed: {e}")
-        except Exception as e:
-            logger.error(f"Drive upload failed: {e}", exc_info=True)
-            await interaction.followup.send(
-                f"❌ Erreur Drive : `{e}`",
-                ephemeral=True,
-            )
-            return
-        finally:
-            try:
-                tmp_out.unlink(missing_ok=True)
-            except Exception:
-                pass
+                drive_service.share_folder_with_users(folder_id, [va_email])
+            except Exception as e:
+                logger.warning(f"Drive share failed: {e}")
 
-        # 12. Save en historique (compte pour rate limit)
+        # 10. Save en historique (compte N fichiers pour rate limit)
         try:
             cf_storage.add_batch(
                 va_name=interaction.user.display_name or interaction.user.name,
                 team=team,
                 device_choice=account_data.get("device_choice", ""),
-                videos_count=1,
-                videos_uploaded=1,
+                videos_count=n_files,
+                videos_uploaded=n_ok,
                 drive_folder_id=folder_id,
                 drive_folder_url=folder_url,
                 drive_folder_name=folder_name,
@@ -1874,21 +1899,30 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
         except Exception as e:
             logger.warning(f"add_batch (respoof) failed: {e}")
 
-        # 13. Réponse au VA (canal + DM)
-        type_emoji = "📷" if file_type == "photo" else "🎥"
-        type_label = "Photo" if file_type == "photo" else "Vidéo"
+        # 11. Réponse récap au VA (canal + DM)
+        device_model = last_info.get("device_model", account_data.get("device_choice", "?"))
+        gps_city = last_info.get("gps_city", account_data.get("gps_city", "?"))
+        ios_v = last_info.get("software", account_data.get("ios_version", "?"))
+        header = (
+            f"✅ **Respoof terminé : {n_ok}/{n_files} fichier(s) OK**"
+            if n_ok == n_files else
+            f"⚠️ **Respoof : {n_ok}/{n_files} fichier(s) OK**"
+        )
         ack = (
-            f"{type_emoji} **Respoof terminé !**\n"
-            f"📁 Type : {type_label}\n"
-            f"🔒 Compte : @**{clean_username}** "
-            f"({info.get('device_model', '?')} · {info.get('gps_city', '?')})\n"
-            f"📱 iOS : `{info.get('software', '?')}`\n"
+            f"{header}\n"
+            f"🔒 Compte : @**{clean_username}** ({device_model} · {gps_city})\n"
+            f"📱 iOS : `{ios_v}`\n"
             f"🕐 Fenêtre : {fenetre_label} (TZ {tz_name})\n"
         )
-        if folder_url:
+        # Détail des fichiers KO si y'en a
+        failed = [(fn, err) for fn, ok, err in results if not ok]
+        if failed:
+            ack += "\n**Échecs :**\n"
+            for fn, err in failed[:10]:
+                ack += f"• `{fn}` — {err}\n"
+        if folder_url and n_ok > 0:
             ack += f"\n🔗 [Lien Drive]({folder_url})"
 
-        # Message canal qui s'auto-supprime après TTL (CF_CHANNEL_MSG_TTL = 30s par défaut)
         channel_msg = await interaction.followup.send(ack, ephemeral=False)
         ttl = _channel_msg_ttl()
         if ttl > 0 and channel_msg:
