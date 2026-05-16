@@ -172,19 +172,6 @@ ENV_VARS: List[EnvVar] = [
     EnvVar("CF_ORPHAN_ACCOUNTS_DAYS", "stats",
            "Seuil cleanup comptes orphelins (0 = désactivé)", default="30",
            validator=_is_int),
-    EnvVar("CF_ACCOUNT_AGING_ENABLED", "limits",
-           "Active les daily caps progressifs sur les nouveaux comptes "
-           "(évite le pattern bot 'spam day 1')", default="1",
-           validator=_is_bool_flag),
-    EnvVar("CF_AGING_DAY_0_3_MAX", "limits",
-           "Cap vidéos/24h pour compte âgé 0-3 jours", default="5",
-           validator=_is_int),
-    EnvVar("CF_AGING_DAY_4_7_MAX", "limits",
-           "Cap vidéos/24h pour compte âgé 4-7 jours", default="10",
-           validator=_is_int),
-    EnvVar("CF_AGING_DAY_8_14_MAX", "limits",
-           "Cap vidéos/24h pour compte âgé 8-14 jours", default="20",
-           validator=_is_int),
 
     # --- FFMPEG / QUALITÉ ---
     EnvVar("CF_HEVC_ENABLED", "ffmpeg",

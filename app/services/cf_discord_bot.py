@@ -982,57 +982,6 @@ def install_clipfusion_commands(bot: "commands.Bot") -> None:
                 f"📍 GPS : **{account_data['gps_city']}**"
             )
 
-        # 4d. ACCOUNT AGING : new accounts have daily caps that ramp up over time.
-        # Un vrai humain qui ouvre un Insta ne poste pas 50 vidéos le J1.
-        # Sans ce check, un compte fresh = pattern bot visible immédiatement.
-        # Caps configurables via env vars, bypass admin.
-        if account_data and not is_admin_user:
-            try:
-                aging_enabled = os.environ.get("CF_ACCOUNT_AGING_ENABLED", "1").strip().lower() not in (
-                    "0", "false", "no", "off"
-                )
-            except Exception:
-                aging_enabled = True
-            if aging_enabled:
-                age_info = cf_storage.get_account_age_and_today_volume(
-                    account_data["username"]
-                )
-                if age_info:
-                    age_days = age_info["age_days"]
-                    today_so_far = age_info["today_videos"]
-                    # Daily cap selon l'âge (configurable env vars)
-                    try:
-                        cap_d0_3 = int(os.environ.get("CF_AGING_DAY_0_3_MAX", "5"))
-                        cap_d4_7 = int(os.environ.get("CF_AGING_DAY_4_7_MAX", "10"))
-                        cap_d8_14 = int(os.environ.get("CF_AGING_DAY_8_14_MAX", "20"))
-                    except Exception:
-                        cap_d0_3, cap_d4_7, cap_d8_14 = 5, 10, 20
-                    if age_days <= 3:
-                        daily_cap = cap_d0_3
-                        stage = "J0-3 (très nouveau)"
-                    elif age_days <= 7:
-                        daily_cap = cap_d4_7
-                        stage = "J4-7 (jeune)"
-                    elif age_days <= 14:
-                        daily_cap = cap_d8_14
-                        stage = "J8-14 (en rodage)"
-                    else:
-                        daily_cap = None  # plus de cap aging (rate_limit prend le relais)
-                        stage = None
-                    if daily_cap is not None and (today_so_far + quantite) > daily_cap:
-                        remaining = max(0, daily_cap - today_so_far)
-                        await interaction.followup.send(
-                            f"🛡️ **Compte trop jeune pour ce volume**\n"
-                            f"@{account_data['username']} a **{age_days} jour(s)** "
-                            f"({stage}).\n"
-                            f"Limite : **{daily_cap} vidéos/24h** sur cette période.\n"
-                            f"Aujourd'hui : **{today_so_far}** déjà uploadées → "
-                            f"il reste **{remaining}**.\n\n"
-                            f"_Un compte trop spammeur dès J1 = pattern bot évident pour Insta._",
-                            ephemeral=True,
-                        )
-                        return
-
         # 4c. INTERVALLE MIN entre batchs sur le même compte (anti-pattern non humain)
         # Variable d'env CF_MIN_INTERVAL_HOURS_PER_ACCOUNT (default 6h)
         # Si 0, désactivé. Bypass admin (comme rate limit).
